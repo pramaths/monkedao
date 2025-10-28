@@ -10,6 +10,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
+import { ImageGenerator } from '@/components/ImageGenerator';
+import { saveCandyMachineToDB } from '@/lib/merchant-db';
 
 const CandyMachineCreator: React.FC = () => {
   const { publicKey, connected, wallet } = useWallet();
@@ -18,7 +20,15 @@ const CandyMachineCreator: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [candyMachineAddress, setCandyMachineAddress] = useState<string>('');
   const [status, setStatus] = useState<CandyMachineStatus | null>(null);
-  const [mintLoading, setMintLoading] = useState(false);
+  const [nftItems, setNftItems] = useState<Array<{name: string, uri: string}>>([]);
+  const [newItemName, setNewItemName] = useState('');
+  const [newItemUri, setNewItemUri] = useState('');
+  const [addingItems, setAddingItems] = useState(false);
+  const [showFormModal, setShowFormModal] = useState(false);
+  const [modalNftName, setModalNftName] = useState('');
+  const [modalNftUri, setModalNftUri] = useState('');
+  const [modalSubmitting, setModalSubmitting] = useState(false);
+  const [mintLoading, setMintLoading] = useState(false); // Add this line
 
   const [config, setConfig] = useState<CandyMachineConfig>({
     itemsAvailable: 1000,
@@ -71,6 +81,23 @@ const CandyMachineCreator: React.FC = () => {
       const candyStatus = await candyManager.getCandyMachineStatus(result.candyMachine);
       setStatus(candyStatus);
       
+      // Save candy machine to MongoDB
+      try {
+        const candyMachineData = {
+          address: result.candyMachine.toString(),
+          itemsAvailable: config.itemsAvailable,
+          itemsRedeemed: 0,
+          createdAt: new Date().toISOString(),
+          name: config.symbol,
+          symbol: config.symbol
+        };
+        
+        await saveCandyMachineToDB(publicKey.toString(), candyMachineData);
+      } catch (error) {
+        console.warn('Failed to save candy machine to database:', error);
+        toast.error('Candy machine created but failed to save to database');
+      }
+      
       toast.success('Candy machine created successfully!');
     } catch (error: any) {
       console.error('Error creating candy machine:', error);
@@ -122,6 +149,69 @@ const CandyMachineCreator: React.FC = () => {
     } catch (error: any) {
       console.error('Error fetching status:', error);
       toast.error('Error fetching status: ' + error.message);
+    }
+  };
+
+  // Add NFT items to candy machine
+  const handleAddItems = async () => {
+    if (!candyManager || !candyMachineAddress || !newItemName.trim() || !newItemUri.trim()) {
+      toast.error('Please fill in both name and URI');
+      return;
+    }
+
+    setAddingItems(true);
+    try {
+      const newItems = [{ name: newItemName, uri: newItemUri }];
+      
+      // Use addConfigLines to add items to the candy machine
+      await candyManager.addConfigLinesAtIndex(
+        new PublicKey(candyMachineAddress),
+        status?.itemsLoaded || 0, // Use current itemsLoaded as index
+        newItems.map(item => ({ name: item.name, uri: item.uri }))
+      );
+      
+      setNftItems(prev => [...prev, ...newItems]);
+      setNewItemName('');
+      setNewItemUri('');
+      
+      // Refresh status to get updated itemsLoaded
+      await handleRefreshStatus();
+      
+      toast.success('NFT item added successfully!');
+    } catch (error: any) {
+      console.error('Error adding items:', error);
+      toast.error('Error adding items: ' + error.message);
+    } finally {
+      setAddingItems(false);
+    }
+  };
+
+  // Add a specific item (used by the modal flow)
+  const handleAddSpecificItem = async (name: string, uri: string) => {
+    if (!candyManager || !candyMachineAddress || !name.trim() || !uri.trim()) {
+      toast.error('Please fill in both name and URI');
+      return;
+    }
+
+    setModalSubmitting(true);
+    try {
+      await candyManager.addConfigLinesAtIndex(
+        new PublicKey(candyMachineAddress),
+        status?.itemsLoaded || 0,
+        [{ name, uri }]
+      );
+
+      setNftItems(prev => [...prev, { name, uri }]);
+      await handleRefreshStatus();
+      toast.success('NFT item added successfully!');
+      setShowFormModal(false);
+      setModalNftName('');
+      setModalNftUri('');
+    } catch (error: any) {
+      console.error('Error adding items:', error);
+      toast.error('Error adding items: ' + error.message);
+    } finally {
+      setModalSubmitting(false);
     }
   };
 
@@ -693,6 +783,289 @@ const CandyMachineCreator: React.FC = () => {
                 🔄 REFRESH DATA
               </Button>
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Modal: Add via Form */}
+      {showFormModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.75)' }}>
+          <div className="w-full max-w-2xl mx-4">
+            <Card 
+              className="border-4"
+              style={{
+                background: "linear-gradient(135deg, rgba(0, 0, 0, 0.85) 0%, rgba(0, 255, 255, 0.08) 100%)",
+                borderImage: "linear-gradient(45deg, #ff00ff, #00ffff, #ffff00, #ff00ff) 1",
+                boxShadow: "0 0 30px rgba(255, 0, 255, 0.5), 0 8px 0 rgba(0, 0, 0, 0.5)",
+              }}
+            >
+              <CardHeader>
+                <CardTitle 
+                  className="text-2xl text-center"
+                  style={{
+                    color: "#ffff00",
+                    textShadow: "3px 3px 0px #00ff00, 6px 6px 0px rgba(0, 0, 0, 0.5)",
+                  }}
+                >
+                  🎨 ADD NFT VIA FORM
+                </CardTitle>
+                <CardDescription 
+                  className="text-center text-base"
+                  style={{
+                    color: "#00ffff",
+                    textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
+                  }}
+                >
+                  Use AI or manual upload to generate the image; the URI auto-fills below
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-2">
+                  <Label 
+                    className="text-lg"
+                    style={{ color: '#ffff00', textShadow: '2px 2px 0px rgba(0,0,0,0.5)' }}
+                  >
+                    🏷️ NFT NAME
+                  </Label>
+                  <Input
+                    type="text"
+                    placeholder="My Deal NFT #1"
+                    value={modalNftName}
+                    onChange={(e) => setModalNftName(e.target.value)}
+                    className="border-2 border-purple-400 bg-black/30 text-white placeholder:text-gray-400"
+                    style={{ boxShadow: '0 0 10px rgba(255,0,255,0.3)' }}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label 
+                    className="text-lg"
+                    style={{ color: '#ffff00', textShadow: '2px 2px 0px rgba(0,0,0,0.5)' }}
+                  >
+                    🎨 IMAGE (AI OR MANUAL)
+                  </Label>
+                  <div className="p-3 rounded-lg border-2 border-cyan-400" style={{ background: 'rgba(0,0,0,0.4)' }}>
+                    <ImageGenerator onImageReady={(uri) => setModalNftUri(uri)} />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label 
+                    className="text-lg"
+                    style={{ color: '#ffff00', textShadow: '2px 2px 0px rgba(0,0,0,0.5)' }}
+                  >
+                    🔗 METADATA URI (AUTO-FILLED)
+                  </Label>
+                  <Input
+                    type="text"
+                    placeholder="https://.../metadata.json"
+                    value={modalNftUri}
+                    onChange={(e) => setModalNftUri(e.target.value)}
+                    className="border-2 border-cyan-400 bg-black/30 text-white placeholder:text-gray-400"
+                    style={{ boxShadow: '0 0 10px rgba(0,255,255,0.3)' }}
+                  />
+                </div>
+
+                <div className="flex gap-3">
+                  <Button
+                    onClick={() => handleAddSpecificItem(modalNftName, modalNftUri)}
+                    disabled={modalSubmitting || !modalNftName.trim() || !modalNftUri.trim()}
+                    className="flex-1 text-lg py-4 border-4 border-purple-400"
+                    style={{
+                      background: modalSubmitting ? 'linear-gradient(45deg,#666,#888)' : 'linear-gradient(45deg,#ff00ff,#00ffff)',
+                      boxShadow: modalSubmitting ? 'none' : '0 0 20px rgba(255,0,255,0.8), 0 8px 0 rgba(0,0,0,0.5)',
+                      textShadow: '2px 2px 0px rgba(0,0,0,0.8)'
+                    }}
+                  >
+                    {modalSubmitting ? '⏳ ADDING...' : '🎯 ADD NFT TO CANDY MACHINE'}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowFormModal(false)}
+                    className="text-lg py-4 border-4 border-cyan-400"
+                    style={{
+                      background: 'linear-gradient(45deg, rgba(0,255,255,0.1), rgba(0,255,100,0.1))',
+                      color: '#00ffff',
+                      textShadow: '1px 1px 0px rgba(0,0,0,0.5)',
+                      boxShadow: '0 0 10px rgba(0,255,255,0.3), 0 4px 0 rgba(0,0,0,0.3)'
+                    }}
+                  >
+                    ✖ CLOSE
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      )}
+
+      {/* Add NFT Items Section */}
+      {candyMachineAddress && (
+        <Card 
+          className="border-4"
+          style={{
+            background: "linear-gradient(135deg, rgba(255, 0, 255, 0.1) 0%, rgba(0, 255, 255, 0.1) 100%)",
+            borderImage: "linear-gradient(45deg, #ff00ff, #00ffff, #ffff00, #ff00ff) 1",
+            boxShadow: "0 0 30px rgba(255, 0, 255, 0.5), 0 8px 0 rgba(0, 0, 0, 0.5)",
+          }}
+        >
+          <CardHeader>
+            <CardTitle 
+              className="text-3xl text-center"
+              style={{
+                color: "#ffff00",
+                textShadow: "3px 3px 0px #00ff00, 6px 6px 0px rgba(0, 0, 0, 0.5)",
+              }}
+            >
+              🎨 ADD NFT ITEMS
+            </CardTitle>
+            <CardDescription 
+              className="text-center text-base"
+              style={{
+                color: "#00ffff",
+                textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
+              }}
+            >
+              ⚡ ADD INDIVIDUAL NFT ITEMS TO YOUR CANDY MACHINE ⚡
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label 
+                  htmlFor="itemName"
+                  className="text-lg"
+                  style={{
+                    color: "#ffff00",
+                    textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
+                  }}
+                >
+                  🏷️ NFT NAME
+                </Label>
+                <Input
+                  id="itemName"
+                  type="text"
+                  value={newItemName}
+                  onChange={(e) => setNewItemName(e.target.value)}
+                  placeholder="My NFT #1"
+                  className="border-2 border-purple-400 bg-black/30 text-white placeholder:text-gray-400"
+                  style={{
+                    boxShadow: "0 0 10px rgba(255, 0, 255, 0.3)",
+                  }}
+                />
+                <p 
+                  className="text-xs"
+                  style={{
+                    color: "#00ffff",
+                    textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
+                  }}
+                >
+                  Name for this specific NFT
+                </p>
+              </div>
+              
+              <div className="space-y-2">
+                <Label 
+                  htmlFor="itemUri"
+                  className="text-lg"
+                  style={{
+                    color: "#ffff00",
+                    textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
+                  }}
+                >
+                  🔗 METADATA URI
+                </Label>
+                <Input
+                  id="itemUri"
+                  type="text"
+                  value={newItemUri}
+                  onChange={(e) => setNewItemUri(e.target.value)}
+                  placeholder="https://example.com/nft1.json"
+                  className="border-2 border-purple-400 bg-black/30 text-white placeholder:text-gray-400"
+                  style={{
+                    boxShadow: "0 0 10px rgba(255, 0, 255, 0.3)",
+                  }}
+                />
+                <p 
+                  className="text-xs"
+                  style={{
+                    color: "#00ffff",
+                    textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
+                  }}
+                >
+                  JSON metadata URI for this NFT
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-4">
+              <Button
+                onClick={handleAddItems}
+                disabled={addingItems || !newItemName.trim() || !newItemUri.trim()}
+                className="flex-1 text-xl py-6 border-4 border-purple-400"
+                style={{
+                  background: addingItems
+                    ? "linear-gradient(45deg, #666, #888)"
+                    : "linear-gradient(45deg, #ff00ff, #00ffff)",
+                  boxShadow: addingItems
+                    ? "none"
+                    : "0 0 20px rgba(255, 0, 255, 0.8), 0 8px 0 rgba(0, 0, 0, 0.5)",
+                  textShadow: "2px 2px 0px rgba(0, 0, 0, 0.8)",
+                }}
+              >
+                {addingItems ? '⏳ ADDING ITEM...' : '🎨 ADD NFT ITEM'}
+              </Button>
+
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setModalNftName('');
+                  setModalNftUri('');
+                  setShowFormModal(true);
+                }}
+                className="flex-1 text-lg py-4 border-4 border-cyan-400"
+                style={{
+                  background: "linear-gradient(45deg, rgba(0, 255, 255, 0.1), rgba(0, 255, 100, 0.1))",
+                  color: "#00ffff",
+                  textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
+                  boxShadow: "0 0 10px rgba(0, 255, 255, 0.3), 0 4px 0 rgba(0, 0, 0, 0.3)",
+                }}
+              >
+                🧩 ADD VIA FORM (AI OR MANUAL)
+              </Button>
+            </div>
+
+            {/* Display added items */}
+            {nftItems.length > 0 && (
+              <div className="space-y-4">
+                <h3 
+                  className="text-lg font-semibold"
+                  style={{
+                    color: "#ffff00",
+                    textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
+                  }}
+                >
+                  📋 ADDED ITEMS ({nftItems.length})
+                </h3>
+                <div className="space-y-2">
+                  {nftItems.map((item, index) => (
+                    <div 
+                      key={index}
+                      className="p-3 rounded-lg border-2 border-purple-400"
+                      style={{
+                        background: "rgba(255, 0, 255, 0.1)",
+                        boxShadow: "0 0 10px rgba(255, 0, 255, 0.3)",
+                      }}
+                    >
+                      <div className="flex justify-between items-center">
+                        <span className="text-white font-semibold">{item.name}</span>
+                        <span className="text-xs text-gray-400 font-mono">{item.uri}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

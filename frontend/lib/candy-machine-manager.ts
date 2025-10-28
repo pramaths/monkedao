@@ -66,6 +66,7 @@ export interface CandyMachineStatus {
   itemsRedeemed: number;
   remaining: number;
   isActive: boolean;
+  itemsLoaded: number;
   guards: any;
 }
 

@@ -48,6 +48,9 @@ const formSchema = z.object({
   geoTag: z.string().optional(),
   category: z.string().optional(),
   imageData: z.string().min(1, "Please generate or upload an image."),
+  candyMachineAddress: z.string().min(1, "Please select a candy machine."),
+  nftName: z.string().min(1, "NFT name is required."),
+  nftUri: z.string().min(1, "NFT metadata URI is required."),
 });
 
 export default function CreateDealPage() {
@@ -73,6 +76,9 @@ export default function CreateDealPage() {
       geoTag: "",
       category: "",
       imageData: "",
+      candyMachineAddress: "",
+      nftName: "",
+      nftUri: "",
     },
   });
 
@@ -145,6 +151,9 @@ export default function CreateDealPage() {
         redemptionRule,
         geoTag,
         category,
+        candyMachineAddress,
+        nftName,
+        nftUri,
       } = values;
 
       console.log("📋 Merchant form values:", {
@@ -160,25 +169,15 @@ export default function CreateDealPage() {
         hasImageData: !!imageData
       });
 
-      // 1. Create NFT metadata
-      toast.info("📋 Creating NFT metadata...");
-      const metadata = createDealMetadata(
-        dealName,
-        dealDescription,
-        discount,
-        category,
-        geoTag
-      );
-      
-      console.log("📄 Created merchant metadata:", metadata);
-      
-      // 2. Derive deal PDA
-      console.log("--- DEBUGGING merchantData.totalDeals ---");
-      console.log("Value:", merchantData.totalDeals);
-      console.log("Type:", typeof merchantData.totalDeals);
-      console.log("Is it a BN instance?", merchantData.totalDeals instanceof BN);
-      
-      // Convert to number and create buffer manually
+      // 1. Validate candy machine address
+      let candyMachinePubkey;
+      try {
+        candyMachinePubkey = new PublicKey(candyMachineAddress);
+      } catch (error) {
+        throw new Error("Invalid candy machine address format");
+      }
+
+      // 2. Derive deal PDA using merchant's total deals count
       const totalDealsNumber = merchantData.totalDeals.toNumber();
       const totalDealsBuffer = Buffer.alloc(8);
       totalDealsBuffer.writeUInt32LE(totalDealsNumber, 0);
@@ -188,52 +187,54 @@ export default function CreateDealPage() {
         program.programId
       );
 
-      // 4. Derive deal authority PDA first
+      // 3. Derive deal authority PDA
       const [dealAuthorityPda] = PublicKey.findProgramAddressSync(
         [Buffer.from("deal_authority"), dealPda.toBuffer()],
         program.programId
       );
 
-      // 5. Mint all NFTs for the deal with PDA as token owner
-      toast.info(`Minting ${totalSupply} NFTs for the deal...`);
-      const mints = [];
-      let metadataUri = "";
-      for (let i = 0; i < totalSupply; i++) {
-        const nftResult = await createClientProgrammableNFT({
-          metadata,
-          imageData,
-          sellerFeeBasisPoints: 5.5,
-          tokenOwner: dealAuthorityPda, // Pass the PDA as token owner
-        });
-        if (i === 0) {
-          metadataUri = nftResult.metadataUri;
-        }
-        mints.push(publicKey(nftResult.mint));
-      }
-      toast.success(`${totalSupply} NFTs minted successfully with PDA as owner!`);
+      // 4. Add NFT to candy machine using addConfigLines
+      toast.info("🎨 Adding NFT to candy machine...");
+      
+      // Import candy machine manager
+      const { DealifiCandyMachineManager } = await import("@/lib/candy-machine-manager");
+      const candyManager = new DealifiCandyMachineManager(umi);
+      
+      // Add the NFT item to the candy machine
+      await candyManager.addConfigLinesAtIndex(
+        candyMachinePubkey,
+        0, // Add at index 0, or use itemsLoaded if available
+        [{ name: nftName, uri: nftUri }]
+      );
+      
+      toast.success("NFT added to candy machine successfully!");
 
-
-      // 6. Create Deal on-chain
+      // 5. Create Deal on-chain
       toast.info("⛓️ Creating deal on blockchain...");
       const expiryTimestamp = Math.floor(Date.now() / 1000) + expiryDays * 86400;
       const priceInLamports = new BN(price * LAMPORTS_PER_SOL);
 
+      // Create deal parameters matching the Anchor program
+      const createDealParams = {
+        candyMachine: candyMachinePubkey,
+        collectionMint: candyMachinePubkey, // Using candy machine as collection mint for now
+        namePrefix: nftName,
+        uriPrefix: nftUri,
+        itemsAvailable: new BN(totalSupply),
+        goLiveDate: null,
+        endDate: new BN(expiryTimestamp),
+        priceLamports: priceInLamports,
+        payoutWallet: merchantData.treasury,
+        allowlistMerkleRoot: null,
+      };
+
       const tx = await program.methods
-        .createDeal(
-          metadataUri,
-          new BN(discount),
-          priceInLamports,
-          totalSupply,
-          new BN(expiryTimestamp),
-          redemptionRule,
-          geoTag || null,
-          category || null
-        )
+        .createDeal(createDealParams)
         .accountsStrict({
+          authority: walletPublicKey,
           merchant: merchantPda,
           deal: dealPda,
           dealAuthority: dealAuthorityPda,
-          authority: walletPublicKey,
           systemProgram: SystemProgram.programId,
         })
         .rpc();
@@ -647,6 +648,113 @@ export default function CreateDealPage() {
                   </FormItem>
                 )}
               />
+
+              {/* Candy Machine Selection */}
+              <FormField
+                control={form.control}
+                name="candyMachineAddress"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel
+                      className="text-lg"
+                      style={{
+                        color: "#ffff00",
+                        textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
+                      }}
+                    >
+                      🍭 CANDY MACHINE ADDRESS
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="Enter your candy machine public key"
+                        {...field}
+                        className="border-2 border-purple-400 bg-black/30 text-white placeholder:text-gray-400"
+                        style={{
+                          boxShadow: "0 0 10px rgba(255, 0, 255, 0.3)",
+                        }}
+                      />
+                    </FormControl>
+                    <FormDescription
+                      style={{
+                        color: "#00ffff",
+                        textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
+                      }}
+                    >
+                      🔗 Paste the candy machine address from your deployed collection
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              {/* NFT Details */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <FormField
+                  control={form.control}
+                  name="nftName"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel
+                        className="text-lg"
+                        style={{
+                          color: "#ffff00",
+                          textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
+                        }}
+                      >
+                        🏷️ NFT NAME
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="My Deal NFT #1"
+                          {...field}
+                          className="border-2 border-purple-400 bg-black/30 text-white placeholder:text-gray-400"
+                          style={{
+                            boxShadow: "0 0 10px rgba(255, 0, 255, 0.3)",
+                          }}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="nftUri"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel
+                        className="text-lg"
+                        style={{
+                          color: "#ffff00",
+                          textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
+                        }}
+                      >
+                        🔗 NFT METADATA URI
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="https://example.com/nft-metadata.json"
+                          {...field}
+                          className="border-2 border-purple-400 bg-black/30 text-white placeholder:text-gray-400"
+                          style={{
+                            boxShadow: "0 0 10px rgba(255, 0, 255, 0.3)",
+                          }}
+                        />
+                      </FormControl>
+                      <FormDescription
+                        style={{
+                          color: "#00ffff",
+                          textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
+                        }}
+                      >
+                        📄 JSON metadata URI for the NFT
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
             </CardContent>
 
             <div className="px-6 pb-6">

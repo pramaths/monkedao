@@ -74,27 +74,45 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="text-center my-12">
-        <Button 
-          size="lg" 
-          className="text-base px-8 py-5 border-4 border-yellow-400"
-          style={{
-            background: "linear-gradient(45deg, #00ff00, #00ffff)",
-            boxShadow: "0 0 20px rgba(0, 255, 100, 0.8), 0 8px 0 rgba(0, 0, 0, 0.5)",
-            textShadow: "2px 2px 0px rgba(0, 0, 0, 0.8)",
-            transition: "transform 0.1s"
-          }}
-          onMouseDown={(e) => {
-            e.currentTarget.style.transform = "translateY(4px)";
-            e.currentTarget.style.boxShadow = "0 0 20px rgba(0, 255, 100, 0.8), 0 4px 0 rgba(0, 0, 0, 0.5)";
-          }}
-          onMouseUp={(e) => {
-            e.currentTarget.style.transform = "translateY(0)";
-            e.currentTarget.style.boxShadow = "0 0 20px rgba(0, 255, 100, 0.8), 0 8px 0 rgba(0, 0, 0, 0.5)";
-          }}
-        >
-          🚀 EXPLORE MORE DEALS
-        </Button>
+      <section className="text-center my-12 space-y-4">
+        <div className="space-x-4">
+          <Button 
+            size="lg" 
+            className="text-base px-8 py-5 border-4 border-yellow-400"
+            style={{
+              background: "linear-gradient(45deg, #00ff00, #00ffff)",
+              boxShadow: "0 0 20px rgba(0, 255, 100, 0.8), 0 8px 0 rgba(0, 0, 0, 0.5)",
+              textShadow: "2px 2px 0px rgba(0, 0, 0, 0.8)",
+              transition: "transform 0.1s"
+            }}
+            onMouseDown={(e) => {
+              e.currentTarget.style.transform = "translateY(4px)";
+              e.currentTarget.style.boxShadow = "0 0 20px rgba(0, 255, 100, 0.8), 0 4px 0 rgba(0, 0, 0, 0.5)";
+            }}
+            onMouseUp={(e) => {
+              e.currentTarget.style.transform = "translateY(0)";
+              e.currentTarget.style.boxShadow = "0 0 20px rgba(0, 255, 100, 0.8), 0 8px 0 rgba(0, 0, 0, 0.5)";
+            }}
+          >
+            🚀 EXPLORE MORE DEALS
+          </Button>
+        </div>
+        
+        <div className="space-x-4">
+          <Button 
+            size="lg" 
+            className="text-base px-8 py-5 border-4 border-purple-400"
+            style={{
+              background: "linear-gradient(45deg, #ff00ff, #00ffff)",
+              boxShadow: "0 0 20px rgba(255, 0, 255, 0.8), 0 8px 0 rgba(0, 0, 0, 0.5)",
+              textShadow: "2px 2px 0px rgba(0, 0, 0, 0.8)",
+              transition: "transform 0.1s"
+            }}
+            onClick={() => window.location.href = '/merchant'}
+          >
+            🏪 MERCHANT DASHBOARD
+          </Button>
+        </div>
       </section>
     </main>
   );

@@ -8,11 +8,14 @@ skip-lint = false
 [programs.localnet]
 dealifi_candy = "3HjM15FLHaRkPmTGhovcdNKu4mv9q6vpvDBeHM4SpvZA"
 
+[programs.devnet]
+dealifi_candy = "3HjM15FLHaRkPmTGhovcdNKu4mv9q6vpvDBeHM4SpvZA"
+
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "localnet"
+cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
