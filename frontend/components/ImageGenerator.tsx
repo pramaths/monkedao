@@ -1,0 +1,188 @@
+"use client";
+
+import { useState } from "react";
+import { Input } from "./ui/input";
+import { Button } from "./ui/button";
+
+interface ImageGeneratorProps {
+  onImageReady: (imageData: string) => void;
+}
+
+export function ImageGenerator({ onImageReady }: ImageGeneratorProps) {
+  const [prompt, setPrompt] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [generatedImage, setGeneratedImage] = useState<string | null>(null);
+  const [manualImage, setManualImage] = useState<string | null>(null);
+  const [mode, setMode] = useState<"ai" | "manual">("ai");
+
+  const handleGenerate = async () => {
+    if (!prompt) return;
+    setIsLoading(true);
+    setGeneratedImage(null);
+    try {
+      const response = await fetch("/api/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+      const data = await response.json();
+      if (data.imageData) {
+        const imageUrl = `data:image/png;base64,${data.imageData}`;
+        setGeneratedImage(imageUrl);
+        onImageReady(imageUrl);
+      }
+    } catch (error) {
+      console.error("Failed to generate image", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64String = reader.result as string;
+        setManualImage(base64String);
+        onImageReady(base64String);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex space-x-2">
+        <Button
+          onClick={() => setMode("ai")}
+          variant={mode === "ai" ? "default" : "outline"}
+          className={mode === "ai" ? "border-4 border-yellow-400" : "border-2 border-cyan-400"}
+          style={mode === "ai" ? {
+            background: "linear-gradient(45deg, #00ff00, #00ffff)",
+            boxShadow: "0 0 10px rgba(0, 255, 100, 0.5)",
+            textShadow: "1px 1px 0px rgba(0, 0, 0, 0.8)"
+          } : {
+            borderColor: "#00ffff",
+            color: "#00ffff"
+          }}
+        >
+          🤖 AI Generate
+        </Button>
+        <Button
+          onClick={() => setMode("manual")}
+          variant={mode === "manual" ? "default" : "outline"}
+          className={mode === "manual" ? "border-4 border-yellow-400" : "border-2 border-cyan-400"}
+          style={mode === "manual" ? {
+            background: "linear-gradient(45deg, #00ff00, #00ffff)",
+            boxShadow: "0 0 10px rgba(0, 255, 100, 0.5)",
+            textShadow: "1px 1px 0px rgba(0, 0, 0, 0.8)"
+          } : {
+            borderColor: "#00ffff",
+            color: "#00ffff"
+          }}
+        >
+          📤 Upload
+        </Button>
+      </div>
+
+      {mode === "ai" && (
+        <div className="space-y-4">
+          <Input
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder="e.g., A pizza deal banner"
+            className="border-2 border-cyan-400 bg-black/30 text-white placeholder:text-gray-400"
+            style={{
+              boxShadow: "0 0 10px rgba(0, 255, 255, 0.3)"
+            }}
+          />
+          <Button 
+            onClick={handleGenerate} 
+            disabled={isLoading}
+            className="w-full border-4 border-yellow-400"
+            style={{
+              background: isLoading 
+                ? "linear-gradient(45deg, #666, #888)" 
+                : "linear-gradient(45deg, #00ff00, #00ffff)",
+              boxShadow: isLoading 
+                ? "none" 
+                : "0 0 15px rgba(0, 255, 100, 0.8), 0 6px 0 rgba(0, 0, 0, 0.5)",
+              textShadow: "2px 2px 0px rgba(0, 0, 0, 0.8)"
+            }}
+          >
+            {isLoading ? "⏳ GENERATING..." : "✨ GENERATE IMAGE"}
+          </Button>
+          {isLoading && (
+            <p className="text-center" style={{
+              color: "#00ffff",
+              textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)"
+            }}>
+              🎨 AI is creating your image...
+            </p>
+          )}
+          {generatedImage && (
+            <div className="space-y-2">
+              <p className="text-center font-bold" style={{
+                color: "#ffff00",
+                textShadow: "2px 2px 0px #00ff00, 4px 4px 0px rgba(0, 0, 0, 0.5)"
+              }}>
+                ✅ IMAGE GENERATED!
+              </p>
+              <div style={{
+                border: "4px solid",
+                borderImage: "linear-gradient(45deg, #00ff00, #00ffff, #ffff00, #00ff00) 1",
+                boxShadow: "0 0 20px rgba(0, 255, 100, 0.5)",
+                padding: "8px"
+              }}>
+                <img
+                  src={generatedImage}
+                  alt="Generated by AI"
+                  className="w-full"
+                  style={{ imageRendering: "pixelated" }}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {mode === "manual" && (
+        <div className="space-y-4">
+          <Input 
+            type="file" 
+            onChange={handleFileChange} 
+            accept="image/*"
+            className="border-2 border-cyan-400 bg-black/30 text-white"
+            style={{
+              boxShadow: "0 0 10px rgba(0, 255, 255, 0.3)"
+            }}
+          />
+          {manualImage && (
+            <div className="space-y-2">
+              <p className="text-center font-bold" style={{
+                color: "#ffff00",
+                textShadow: "2px 2px 0px #00ff00, 4px 4px 0px rgba(0, 0, 0, 0.5)"
+              }}>
+                ✅ IMAGE UPLOADED!
+              </p>
+              <div style={{
+                border: "4px solid",
+                borderImage: "linear-gradient(45deg, #00ff00, #00ffff, #ffff00, #00ff00) 1",
+                boxShadow: "0 0 20px rgba(0, 255, 100, 0.5)",
+                padding: "8px"
+              }}>
+                <img 
+                  src={manualImage} 
+                  alt="Uploaded preview" 
+                  className="w-full"
+                  style={{ imageRendering: "pixelated" }}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,703 @@
+"use client";
+
+import React, { useState, useEffect } from 'react';
+import { useWallet } from '@solana/wallet-adapter-react';
+import { PublicKey } from '@solana/web3.js';
+import { DealifiCandyMachineManager, CandyMachineConfig, GuardConfig, CandyMachineStatus } from '@/lib/candy-machine-manager';
+import useUmiStore from '@/store/useUmiStore';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { toast } from 'sonner';
+
+const CandyMachineCreator: React.FC = () => {
+  const { publicKey, connected, wallet } = useWallet();
+  const { umi, signer, updateSigner } = useUmiStore();
+  const [candyManager, setCandyManager] = useState<DealifiCandyMachineManager | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [candyMachineAddress, setCandyMachineAddress] = useState<string>('');
+  const [status, setStatus] = useState<CandyMachineStatus | null>(null);
+  const [mintLoading, setMintLoading] = useState(false);
+
+  const [config, setConfig] = useState<CandyMachineConfig>({
+    itemsAvailable: 1000,
+    symbol: 'DEALIFI',
+    sellerFeeBasisPoints: 500,
+    maxSupply: 0,
+    isMutable: true,
+  });
+
+  const [guards, setGuards] = useState<GuardConfig>({
+    solPayment: {
+      lamports: 1000000000, // 1 SOL
+      destination: ''
+    },
+    mintLimit: {
+      id: 1,
+      limit: 5
+    },
+    startDate: {
+      date: Math.floor(Date.now() / 1000) + 3600 // 1 hour from now
+    }
+  });
+
+  useEffect(() => {
+    if (connected && publicKey && wallet) {
+      // Update Umi with the connected wallet
+      updateSigner(wallet.adapter);
+    }
+  }, [connected, publicKey, wallet, updateSigner]);
+
+  useEffect(() => {
+    if (umi && signer) {
+      const manager = new DealifiCandyMachineManager(umi);
+      setCandyManager(manager);
+    }
+  }, [signer, umi]);
+
+  const handleCreateCandyMachine = async () => {
+    if (!candyManager || !publicKey) {
+      toast.error('Please connect your wallet first');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const result = await candyManager.createCandyMachine(config, guards);
+      setCandyMachineAddress(result.candyMachine.toString());
+      
+      // Fetch initial status
+      const candyStatus = await candyManager.getCandyMachineStatus(result.candyMachine);
+      setStatus(candyStatus);
+      
+      toast.success('Candy machine created successfully!');
+    } catch (error: any) {
+      console.error('Error creating candy machine:', error);
+      toast.error('Error creating candy machine: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Mint NFT
+  const handleMintNFT = async () => {
+    if (!candyManager || !publicKey || !candyMachineAddress || !signer) {
+      toast.error('Please connect your wallet first');
+      return;
+    }
+
+    setMintLoading(true);
+    try {
+      const nftMint = await candyManager.mintNFT(
+        new PublicKey(candyMachineAddress),
+        signer
+      );
+      
+      // Update status after minting
+      const candyStatus = await candyManager.getCandyMachineStatus(
+        new PublicKey(candyMachineAddress)
+      );
+      setStatus(candyStatus);
+      
+      toast.success(`NFT minted successfully! Mint: ${nftMint.toString()}`);
+    } catch (error: any) {
+      console.error('Error minting NFT:', error);
+      toast.error('Error minting NFT: ' + error.message);
+    } finally {
+      setMintLoading(false);
+    }
+  };
+
+  // Refresh status
+  const handleRefreshStatus = async () => {
+    if (!candyManager || !candyMachineAddress) return;
+
+    try {
+      const candyStatus = await candyManager.getCandyMachineStatus(
+        new PublicKey(candyMachineAddress)
+      );
+      setStatus(candyStatus);
+      toast.success('Status refreshed');
+    } catch (error: any) {
+      console.error('Error fetching status:', error);
+      toast.error('Error fetching status: ' + error.message);
+    }
+  };
+
+  if (!connected) {
+    return (
+      <div className="container mx-auto px-4 py-8 pt-24 flex justify-center items-center min-h-screen">
+        <Card 
+          className="w-full max-w-md border-4"
+          style={{
+            background: "linear-gradient(135deg, rgba(0, 255, 100, 0.1) 0%, rgba(0, 255, 255, 0.1) 100%)",
+            borderImage: "linear-gradient(45deg, #00ff00, #00ffff, #ffff00, #00ff00) 1",
+            boxShadow: "0 0 30px rgba(0, 255, 100, 0.5), 0 8px 0 rgba(0, 0, 0, 0.5)",
+          }}
+        >
+          <CardHeader>
+            <CardTitle 
+              className="text-2xl text-center"
+              style={{
+                color: "#ffff00",
+                textShadow: "3px 3px 0px #00ff00, 6px 6px 0px rgba(0, 0, 0, 0.5)",
+              }}
+            >
+              🔗 CONNECT WALLET
+            </CardTitle>
+            <CardDescription 
+              className="text-center"
+              style={{
+                color: "#00ffff",
+                textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
+              }}
+            >
+              Please connect your wallet to create and manage candy machines.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="container mx-auto px-4 py-8 pt-24 space-y-8">
+      <div className="text-center">
+        <h1 
+          className="text-4xl font-bold mb-4"
+          style={{
+            color: "#ffff00",
+            textShadow: "3px 3px 0px #00ff00, 6px 6px 0px rgba(0, 0, 0, 0.5)",
+          }}
+        >
+          🍭 NFT CANDY MACHINE
+        </h1>
+        <p 
+          className="text-xl"
+          style={{
+            color: "#00ffff",
+            textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
+          }}
+        >
+          Deploy and manage your NFT collection with professional candy machine infrastructure
+        </p>
+      </div>
+      
+      <Card 
+        className="border-4"
+        style={{
+          background: "linear-gradient(135deg, rgba(0, 255, 100, 0.1) 0%, rgba(0, 255, 255, 0.1) 100%)",
+          borderImage: "linear-gradient(45deg, #00ff00, #00ffff, #ffff00, #00ff00) 1",
+          boxShadow: "0 0 30px rgba(0, 255, 100, 0.5), 0 8px 0 rgba(0, 0, 0, 0.5)",
+        }}
+      >
+        <CardHeader>
+          <CardTitle 
+            className="text-3xl text-center"
+            style={{
+              color: "#ffff00",
+              textShadow: "3px 3px 0px #00ff00, 6px 6px 0px rgba(0, 0, 0, 0.5)",
+            }}
+          >
+            🚀 DEPLOY CANDY MACHINE
+          </CardTitle>
+          <CardDescription 
+            className="text-center text-base"
+            style={{
+              color: "#00ffff",
+              textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
+            }}
+          >
+            ⚡ CONFIGURE YOUR NFT COLLECTION AND DEPLOY TO SOLANA ⚡
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label 
+                htmlFor="itemsAvailable"
+                className="text-lg"
+                style={{
+                  color: "#ffff00",
+                  textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
+                }}
+              >
+                📦 COLLECTION SIZE
+              </Label>
+              <Input
+                id="itemsAvailable"
+                type="number"
+                min="1"
+                max="10000"
+                value={config.itemsAvailable}
+                onChange={(e) => setConfig(prev => ({ ...prev, itemsAvailable: parseInt(e.target.value) || 0 }))}
+                placeholder="1000"
+                className="border-2 border-cyan-400 bg-black/30 text-white placeholder:text-gray-400"
+                style={{
+                  boxShadow: "0 0 10px rgba(0, 255, 255, 0.3)",
+                }}
+              />
+              <p 
+                className="text-xs"
+                style={{
+                  color: "#00ffff",
+                  textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
+                }}
+              >
+                Total number of NFTs in your collection
+              </p>
+            </div>
+            
+            <div className="space-y-2">
+              <Label 
+                htmlFor="symbol"
+                className="text-lg"
+                style={{
+                  color: "#ffff00",
+                  textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
+                }}
+              >
+                🏷️ COLLECTION SYMBOL
+              </Label>
+              <Input
+                id="symbol"
+                type="text"
+                maxLength={10}
+                value={config.symbol}
+                onChange={(e) => setConfig(prev => ({ ...prev, symbol: e.target.value.toUpperCase() }))}
+                placeholder="MYNFT"
+                className="border-2 border-cyan-400 bg-black/30 text-white placeholder:text-gray-400"
+                style={{
+                  boxShadow: "0 0 10px rgba(0, 255, 255, 0.3)",
+                }}
+              />
+              <p 
+                className="text-xs"
+                style={{
+                  color: "#00ffff",
+                  textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
+                }}
+              >
+                Short identifier for your collection (max 10 chars)
+              </p>
+            </div>
+            
+            <div className="space-y-2">
+              <Label 
+                htmlFor="sellerFee"
+                className="text-lg"
+                style={{
+                  color: "#ffff00",
+                  textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
+                }}
+              >
+                💰 ROYALTY FEE (%)
+              </Label>
+              <Input
+                id="sellerFee"
+                type="number"
+                min="0"
+                max="1000"
+                step="10"
+                value={config.sellerFeeBasisPoints / 100}
+                onChange={(e) => setConfig(prev => ({ ...prev, sellerFeeBasisPoints: parseInt(e.target.value) * 100 }))}
+                placeholder="5"
+                className="border-2 border-cyan-400 bg-black/30 text-white placeholder:text-gray-400"
+                style={{
+                  boxShadow: "0 0 10px rgba(0, 255, 255, 0.3)",
+                }}
+              />
+              <p 
+                className="text-xs"
+                style={{
+                  color: "#00ffff",
+                  textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
+                }}
+              >
+                Creator royalty percentage (0-10%)
+              </p>
+            </div>
+            
+            <div className="space-y-2">
+              <Label 
+                htmlFor="maxSupply"
+                className="text-lg"
+                style={{
+                  color: "#ffff00",
+                  textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
+                }}
+              >
+                🔢 MAX SUPPLY
+              </Label>
+              <Input
+                id="maxSupply"
+                type="number"
+                min="0"
+                value={config.maxSupply}
+                onChange={(e) => setConfig(prev => ({ ...prev, maxSupply: parseInt(e.target.value) || 0 }))}
+                placeholder="0"
+                className="border-2 border-cyan-400 bg-black/30 text-white placeholder:text-gray-400"
+                style={{
+                  boxShadow: "0 0 10px rgba(0, 255, 255, 0.3)",
+                }}
+              />
+              <p 
+                className="text-xs"
+                style={{
+                  color: "#00ffff",
+                  textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
+                }}
+              >
+                Maximum supply (0 = unlimited)
+              </p>
+            </div>
+          </div>
+
+          {/* Mint Configuration */}
+          <div className="space-y-4">
+            <h3 
+              className="text-lg font-semibold"
+              style={{
+                color: "#ffff00",
+                textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
+              }}
+            >
+              ⚙️ MINT CONFIGURATION
+            </h3>
+            <p 
+              className="text-sm"
+              style={{
+                color: "#00ffff",
+                textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
+              }}
+            >
+              Configure pricing, limits, and timing for your NFT collection
+            </p>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label 
+                  htmlFor="solPayment"
+                  className="text-lg"
+                  style={{
+                    color: "#ffff00",
+                    textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
+                  }}
+                >
+                  💎 MINT PRICE (SOL)
+                </Label>
+                <Input
+                  id="solPayment"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={(guards.solPayment?.lamports || 0) / 1000000000}
+                  onChange={(e) => setGuards(prev => ({
+                    ...prev,
+                    solPayment: {
+                      ...prev.solPayment!,
+                      lamports: Math.floor(parseFloat(e.target.value) * 1000000000)
+                    }
+                  }))}
+                  placeholder="1.0"
+                  className="border-2 border-cyan-400 bg-black/30 text-white placeholder:text-gray-400"
+                  style={{
+                    boxShadow: "0 0 10px rgba(0, 255, 255, 0.3)",
+                  }}
+                />
+                <p 
+                  className="text-xs"
+                  style={{
+                    color: "#00ffff",
+                    textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
+                  }}
+                >
+                  Price per NFT in SOL
+                </p>
+              </div>
+              
+              <div className="space-y-2">
+                <Label 
+                  htmlFor="mintLimit"
+                  className="text-lg"
+                  style={{
+                    color: "#ffff00",
+                    textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
+                  }}
+                >
+                  🚫 PER WALLET LIMIT
+                </Label>
+                <Input
+                  id="mintLimit"
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={guards.mintLimit?.limit || 1}
+                  onChange={(e) => setGuards(prev => ({
+                    ...prev,
+                    mintLimit: {
+                      ...prev.mintLimit!,
+                      limit: parseInt(e.target.value) || 1
+                    }
+                  }))}
+                  placeholder="5"
+                  className="border-2 border-cyan-400 bg-black/30 text-white placeholder:text-gray-400"
+                  style={{
+                    boxShadow: "0 0 10px rgba(0, 255, 255, 0.3)",
+                  }}
+                />
+                <p 
+                  className="text-xs"
+                  style={{
+                    color: "#00ffff",
+                    textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
+                  }}
+                >
+                  Max NFTs per wallet
+                </p>
+              </div>
+              
+              <div className="space-y-2">
+                <Label 
+                  htmlFor="startDate"
+                  className="text-lg"
+                  style={{
+                    color: "#ffff00",
+                    textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
+                  }}
+                >
+                  ⏰ MINT START TIME
+                </Label>
+                <Input
+                  id="startDate"
+                  type="datetime-local"
+                  value={guards.startDate?.date ? new Date(guards.startDate.date * 1000).toISOString().slice(0, 16) : ''}
+                  onChange={(e) => setGuards(prev => ({
+                    ...prev,
+                    startDate: {
+                      date: Math.floor(new Date(e.target.value).getTime() / 1000)
+                    }
+                  }))}
+                  className="border-2 border-cyan-400 bg-black/30 text-white placeholder:text-gray-400"
+                  style={{
+                    boxShadow: "0 0 10px rgba(0, 255, 255, 0.3)",
+                  }}
+                />
+                <p 
+                  className="text-xs"
+                  style={{
+                    color: "#00ffff",
+                    textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
+                  }}
+                >
+                  When minting becomes available
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex gap-4">
+            <Button
+              onClick={handleCreateCandyMachine}
+              disabled={loading || !candyManager || config.itemsAvailable <= 0 || !config.symbol}
+              className="flex-1 text-xl py-6 border-4 border-yellow-400"
+              style={{
+                background: loading
+                  ? "linear-gradient(45deg, #666, #888)"
+                  : "linear-gradient(45deg, #00ff00, #00ffff)",
+                boxShadow: loading
+                  ? "none"
+                  : "0 0 20px rgba(0, 255, 100, 0.8), 0 8px 0 rgba(0, 0, 0, 0.5)",
+                textShadow: "2px 2px 0px rgba(0, 0, 0, 0.8)",
+              }}
+            >
+              {loading ? '⏳ DEPLOYING...' : '🚀 DEPLOY CANDY MACHINE'}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setConfig({
+                  itemsAvailable: 1000,
+                  symbol: 'MYNFT',
+                  sellerFeeBasisPoints: 500,
+                  maxSupply: 0,
+                  isMutable: true,
+                });
+                setGuards({
+                  solPayment: { lamports: 1000000000, destination: '' },
+                  mintLimit: { id: 1, limit: 5 },
+                  startDate: { date: Math.floor(Date.now() / 1000) + 3600 }
+                });
+              }}
+              className="text-lg py-4 border-4 border-cyan-400"
+              style={{
+                background: "linear-gradient(45deg, rgba(0, 255, 255, 0.1), rgba(0, 255, 100, 0.1))",
+                color: "#00ffff",
+                textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
+                boxShadow: "0 0 10px rgba(0, 255, 255, 0.3), 0 4px 0 rgba(0, 0, 0, 0.3)",
+              }}
+            >
+              🔄 RESET
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Candy Machine Status Section */}
+      {candyMachineAddress && (
+        <Card 
+          className="border-4"
+          style={{
+            background: "linear-gradient(135deg, rgba(0, 255, 100, 0.1) 0%, rgba(0, 255, 255, 0.1) 100%)",
+            borderImage: "linear-gradient(45deg, #00ff00, #00ffff, #ffff00, #00ff00) 1",
+            boxShadow: "0 0 30px rgba(0, 255, 100, 0.5), 0 8px 0 rgba(0, 0, 0, 0.5)",
+          }}
+        >
+          <CardHeader>
+            <CardTitle 
+              className="text-3xl text-center"
+              style={{
+                color: "#ffff00",
+                textShadow: "3px 3px 0px #00ff00, 6px 6px 0px rgba(0, 0, 0, 0.5)",
+              }}
+            >
+              📊 COLLECTION DASHBOARD
+            </CardTitle>
+            <CardDescription 
+              className="text-center text-base"
+              style={{
+                color: "#00ffff",
+                textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
+              }}
+            >
+              ⚡ MONITOR YOUR DEPLOYED COLLECTION AND MANAGE MINTING ⚡
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="space-y-2">
+              <Label 
+                className="text-lg"
+                style={{
+                  color: "#ffff00",
+                  textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
+                }}
+              >
+                🔗 COLLECTION CONTRACT ADDRESS
+              </Label>
+              <div className="flex gap-2">
+                <Input
+                  value={candyMachineAddress}
+                  readOnly
+                  className="bg-black/30 font-mono text-sm border-2 border-cyan-400 text-white"
+                  style={{
+                    boxShadow: "0 0 10px rgba(0, 255, 255, 0.3)",
+                  }}
+                />
+                <Button
+                  variant="outline"
+                  onClick={() => navigator.clipboard.writeText(candyMachineAddress)}
+                  className="border-4 border-cyan-400"
+                  style={{
+                    background: "linear-gradient(45deg, rgba(0, 255, 255, 0.1), rgba(0, 255, 100, 0.1))",
+                    color: "#00ffff",
+                    textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
+                    boxShadow: "0 0 10px rgba(0, 255, 255, 0.3), 0 4px 0 rgba(0, 0, 0, 0.3)",
+                  }}
+                >
+                  📋 COPY
+                </Button>
+              </div>
+              <p 
+                className="text-xs"
+                style={{
+                  color: "#00ffff",
+                  textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
+                }}
+              >
+                Your deployed candy machine contract address
+              </p>
+            </div>
+
+            {status && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <Card>
+                  <CardContent className="pt-6">
+                    <div className="text-center">
+                      <div className="text-3xl font-bold text-blue-600">{status.itemsAvailable}</div>
+                      <div className="text-sm text-muted-foreground">Total Available</div>
+                    </div>
+                  </CardContent>
+                </Card>
+                
+                <Card>
+                  <CardContent className="pt-6">
+                    <div className="text-center">
+                      <div className="text-3xl font-bold text-green-600">{status.itemsRedeemed}</div>
+                      <div className="text-sm text-muted-foreground">Redeemed</div>
+                    </div>
+                  </CardContent>
+                </Card>
+                
+                <Card>
+                  <CardContent className="pt-6">
+                    <div className="text-center">
+                      <div className="text-3xl font-bold text-orange-600">{status.remaining}</div>
+                      <div className="text-sm text-muted-foreground">Remaining</div>
+                    </div>
+                  </CardContent>
+                </Card>
+                
+                <Card>
+                  <CardContent className="pt-6">
+                    <div className="text-center">
+                      <div className={`text-3xl font-bold ${status.isActive ? 'text-green-600' : 'text-red-600'}`}>
+                        {status.isActive ? 'Active' : 'Inactive'}
+                      </div>
+                      <div className="text-sm text-muted-foreground">Status</div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
+            <div className="flex gap-4">
+              <Button
+                onClick={handleMintNFT}
+                disabled={mintLoading || !status?.isActive || !candyManager}
+                className="flex-1 text-xl py-6 border-4 border-yellow-400"
+                style={{
+                  background: mintLoading
+                    ? "linear-gradient(45deg, #666, #888)"
+                    : "linear-gradient(45deg, #00ff00, #00ffff)",
+                  boxShadow: mintLoading
+                    ? "none"
+                    : "0 0 20px rgba(0, 255, 100, 0.8), 0 8px 0 rgba(0, 0, 0, 0.5)",
+                  textShadow: "2px 2px 0px rgba(0, 0, 0, 0.8)",
+                }}
+              >
+                {mintLoading ? '⏳ MINTING NFT...' : '🎯 MINT NFT'}
+              </Button>
+              
+              <Button
+                onClick={handleRefreshStatus}
+                variant="outline"
+                className="flex-1 text-lg py-4 border-4 border-cyan-400"
+                style={{
+                  background: "linear-gradient(45deg, rgba(0, 255, 255, 0.1), rgba(0, 255, 100, 0.1))",
+                  color: "#00ffff",
+                  textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
+                  boxShadow: "0 0 10px rgba(0, 255, 255, 0.3), 0 4px 0 rgba(0, 0, 0, 0.3)",
+                }}
+              >
+                🔄 REFRESH DATA
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+};
+
+export default CandyMachineCreator;

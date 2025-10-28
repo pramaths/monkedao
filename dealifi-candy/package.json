@@ -1,0 +1,30 @@
+{
+  "name": "dealifi-candy",
+  "version": "0.1.0",
+  "description": "Dealifi Candy Machine Program",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "^0.31.1",
+    "@solana/web3.js": "^1.87.6"
+  },
+  "devDependencies": {
+    "@types/chai": "^4.3.0",
+    "@types/mocha": "^9.0.0",
+    "chai": "^4.3.0",
+    "mocha": "^9.0.0",
+    "ts-mocha": "^10.0.0",
+    "typescript": "^4.3.0"
+  },
+  "keywords": [
+    "solana",
+    "anchor",
+    "candy-machine",
+    "nft"
+  ],
+  "author": "",
+  "license": "MIT"
+}
