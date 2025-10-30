@@ -9,6 +9,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getMerchantFromDB } from '@/lib/merchant-db';
+import { CandyMachineData } from '@/lib/candy-machine-data';
+import { DealifiCandyMachineManager } from '@/lib/candy-machine-manager';
+import useUmiStore from '@/store/useUmiStore';
 import Link from "next/link";
 export default function MerchantPage() {
   const [merchantName, setMerchantName] = useState("");
@@ -20,14 +23,83 @@ export default function MerchantPage() {
   const [totalDeals, setTotalDeals] = useState<number>(0);
   const [myDeals, setMyDeals] = useState<any[]>([]);
   const [myCandyMachines, setMyCandyMachines] = useState<any[]>([]);
+  const [candyMachineData, setCandyMachineData] = useState<CandyMachineData[]>([]);
+  const [loadingCandyMachineData, setLoadingCandyMachineData] = useState(false);
   const { publicKey } = useWallet();
   const { program } = useDealifiProgram();
+  const { umi } = useUmiStore();
 
   useEffect(() => {
     if (publicKey && program) {
       checkMerchantAccount();
     }
   }, [publicKey, program]);
+
+  // Fetch candy machine data when candy machines change
+  useEffect(() => {
+    if (myCandyMachines.length > 0) {
+      fetchCandyMachineDetails();
+    } else {
+      setCandyMachineData([]);
+    }
+  }, [myCandyMachines]);
+
+  const fetchCandyMachineDetails = async () => {
+    if (myCandyMachines.length === 0) return;
+    
+    if (!umi.identity || !umi.identity.publicKey) {
+      console.warn('⚠️ UMI instance has no signer identity - cannot fetch candy machine details');
+      toast.error('Please connect your wallet to view candy machine details');
+      return;
+    }
+    
+    setLoadingCandyMachineData(true);
+    try {
+      const candyManager = new DealifiCandyMachineManager(umi);
+      const statuses = await Promise.allSettled(
+        myCandyMachines.map(async (cm) => {
+          const status = await candyManager.getCandyMachineStatus(new PublicKey(cm.address));
+          return {
+            address: cm.address,
+            name: cm.name || 'Candy Machine Collection',
+            symbol: cm.symbol || 'CM',
+            itemsAvailable: status.itemsAvailable,
+            itemsRedeemed: status.itemsRedeemed,
+            itemsLoaded: status.itemsLoaded,
+            remaining: status.remaining,
+            isActive: status.isActive,
+            price: 0, // Not available in status
+            goLiveDate: null,
+            endDate: null,
+            creator: '', // Not available in status
+            collection: null,
+            authority: '', // Not available in status
+            mintAuthority: '',
+            updateAuthority: '',
+            sellerFeeBasisPoints: 0,
+            isMutable: false,
+            retainAuthority: true,
+            maxSupply: 0,
+            isFullyLoaded: status.itemsLoaded >= status.itemsAvailable,
+            isFullyMinted: status.itemsRedeemed >= status.itemsAvailable,
+            isEnded: false,
+            isLive: status.isActive,
+          };
+        })
+      );
+      
+      const successfulStatuses = statuses
+        .filter((result): result is PromiseFulfilledResult<any> => result.status === 'fulfilled')
+        .map(result => result.value);
+      
+      setCandyMachineData(successfulStatuses);
+    } catch (error) {
+      console.error('Failed to fetch candy machine details:', error);
+      toast.error('Failed to load candy machine details');
+    } finally {
+      setLoadingCandyMachineData(false);
+    }
+  };
 
   const checkMerchantAccount = async () => {
     if (!publicKey || !program) return;
@@ -320,15 +392,34 @@ export default function MerchantPage() {
             }}
           >
             <CardHeader>
-              <CardTitle 
-                className="text-2xl"
-                style={{
-                  color: "#ffff00",
-                  textShadow: "2px 2px 0px rgba(0, 0, 0, 0.8)"
-                }}
-              >
-                🍭 MY CANDY MACHINES ({myCandyMachines.length})
-              </CardTitle>
+              <div className="flex justify-between items-center">
+                <CardTitle 
+                  className="text-2xl flex items-center gap-3"
+                  style={{
+                    color: "#ffff00",
+                    textShadow: "2px 2px 0px rgba(0, 0, 0, 0.8)"
+                  }}
+                >
+                  🍭 MY CANDY MACHINES ({myCandyMachines.length})
+                  {loadingCandyMachineData && (
+                    <span className="text-sm text-cyan-400">⏳ Loading details...</span>
+                  )}
+                </CardTitle>
+                <Button
+                  onClick={fetchCandyMachineDetails}
+                  disabled={loadingCandyMachineData || myCandyMachines.length === 0}
+                  className="text-sm py-2 px-4 border-2 border-cyan-400"
+                  style={{
+                    background: loadingCandyMachineData 
+                      ? "linear-gradient(45deg, #666, #888)" 
+                      : "linear-gradient(45deg, rgba(0,255,255,0.1), rgba(0,255,100,0.1))",
+                    color: "#00ffff",
+                    textShadow: "1px 1px 0px rgba(0,0,0,0.5)"
+                  }}
+                >
+                  {loadingCandyMachineData ? '⏳' : '🔄'} Refresh
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               {myCandyMachines.length === 0 ? (
@@ -336,24 +427,137 @@ export default function MerchantPage() {
                   🚧 No candy machines created yet. Create your first one above! 🚧
                 </p>
               ) : (
-                <div className="space-y-4">
-                  {myCandyMachines.map((cm, index) => (
+                <div className="space-y-6">
+                  {candyMachineData.map((cmData, index) => (
                     <div 
-                      key={index}
-                      className="p-4 rounded-lg border-2 border-purple-400"
+                      key={cmData.address}
+                      className="p-6 rounded-lg border-2 border-purple-400"
                       style={{
                         background: "rgba(255, 0, 255, 0.1)",
-                        boxShadow: "0 0 10px rgba(255, 0, 255, 0.3)"
+                        boxShadow: "0 0 15px rgba(255, 0, 255, 0.3)"
                       }}
                     >
-                      <div className="flex justify-between items-center">
+                      {/* Header */}
+                      <div className="flex justify-between items-start mb-4">
                         <div>
-                          <p className="text-white font-semibold">Candy Machine #{index + 1}</p>
-                          <p className="text-xs text-gray-400 font-mono">{cm.address}</p>
+                          <h3 className="text-xl font-bold text-white mb-1">
+                            {cmData.name} ({cmData.symbol})
+                          </h3>
+                          <p className="text-xs text-gray-400 font-mono break-all">
+                            {cmData.address}
+                          </p>
                         </div>
                         <div className="text-right">
-                          <p className="text-sm text-cyan-400">Items: {cm.itemsAvailable || 'N/A'}</p>
-                          <p className="text-sm text-green-400">Redeemed: {cm.itemsRedeemed || 0}</p>
+                          <div className={`px-3 py-1 rounded-full text-sm font-bold ${
+                            cmData.isActive && cmData.isLive && !cmData.isEnded && !cmData.isFullyMinted
+                              ? 'bg-green-500 text-black'
+                              : cmData.isFullyMinted
+                                ? 'bg-yellow-500 text-black'
+                                : 'bg-red-500 text-white'
+                          }`}>
+                            {cmData.isFullyMinted ? 'SOLD OUT' : 
+                             cmData.isEnded ? 'ENDED' :
+                             cmData.isLive ? 'LIVE' : 'PENDING'}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Stats Grid */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                        <div className="text-center p-3 rounded border border-cyan-400" style={{ background: 'rgba(0,0,0,0.3)' }}>
+                          <p className="text-2xl font-bold text-cyan-400">{cmData.itemsAvailable}</p>
+                          <p className="text-xs text-gray-400">Total Supply</p>
+                        </div>
+                        <div className="text-center p-3 rounded border border-green-400" style={{ background: 'rgba(0,0,0,0.3)' }}>
+                          <p className="text-2xl font-bold text-green-400">{cmData.itemsRedeemed}</p>
+                          <p className="text-xs text-gray-400">Minted</p>
+                        </div>
+                        <div className="text-center p-3 rounded border border-yellow-400" style={{ background: 'rgba(0,0,0,0.3)' }}>
+                          <p className="text-2xl font-bold text-yellow-400">{cmData.remaining}</p>
+                          <p className="text-xs text-gray-400">Remaining</p>
+                        </div>
+                        <div className="text-center p-3 rounded border border-purple-400" style={{ background: 'rgba(0,0,0,0.3)' }}>
+                          <p className="text-2xl font-bold text-purple-400">{cmData.price.toFixed(2)}</p>
+                          <p className="text-xs text-gray-400">Price (SOL)</p>
+                        </div>
+                      </div>
+
+                      {/* Additional Info */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <p className="text-gray-400 mb-1">📅 Go Live Date</p>
+                          <p className="text-white">
+                            {cmData.goLiveDate 
+                              ? new Date(cmData.goLiveDate * 1000).toLocaleString()
+                              : 'Not set'
+                            }
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-gray-400 mb-1">⏰ End Date</p>
+                          <p className="text-white">
+                            {cmData.endDate 
+                              ? new Date(cmData.endDate * 1000).toLocaleString()
+                              : 'No end date'
+                            }
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-gray-400 mb-1">👤 Authority</p>
+                          <p className="text-white font-mono text-xs break-all">{cmData.authority}</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-400 mb-1">💰 Royalty</p>
+                          <p className="text-white">{(cmData.sellerFeeBasisPoints / 100).toFixed(2)}%</p>
+                        </div>
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div className="mt-4 pt-4 border-t border-purple-400">
+                        <div className="flex gap-2">
+                          <Button
+                            onClick={() => navigator.clipboard.writeText(cmData.address)}
+                            className="flex-1 text-sm py-2 border-2 border-cyan-400"
+                            style={{
+                              background: "linear-gradient(45deg, rgba(0,255,255,0.1), rgba(0,255,100,0.1))",
+                              color: "#00ffff",
+                              textShadow: "1px 1px 0px rgba(0,0,0,0.5)"
+                            }}
+                          >
+                            📋 Copy Address
+                          </Button>
+                          <Button
+                            onClick={async () => {
+                              try {
+                                const candyManager = new DealifiCandyMachineManager(umi);
+                                await candyManager.updateCandyMachineGuards(new PublicKey(cmData.address), {});
+                                toast.success('✅ Candy machine is now live!');
+                                // Refresh the data
+                                fetchCandyMachineDetails();
+                              } catch (error) {
+                                console.error('Failed to make candy machine live:', error);
+                                toast.error('Failed to make candy machine live');
+                              }
+                            }}
+                            className="flex-1 text-sm py-2 border-2 border-green-400"
+                            style={{
+                              background: "linear-gradient(45deg, #00ff00, #00ffff)",
+                              textShadow: "1px 1px 0px rgba(0,0,0,0.5)"
+                            }}
+                          >
+                            🚀 Make Live
+                          </Button>
+                          <Link href={`/candy-machine?address=${cmData.address}`}>
+                            <Button
+                              className="flex-1 text-sm py-2 border-2 border-purple-400"
+                              style={{
+                                background: "linear-gradient(45deg, #ff00ff, #00ffff)",
+                                textShadow: "1px 1px 0px rgba(0,0,0,0.5)"
+                              }}
+                            >
+                              🎯 Manage
+                            </Button>
+                          </Link>
                         </div>
                       </div>
                     </div>

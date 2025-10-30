@@ -9,6 +9,36 @@ const nextConfig: NextConfig = {
         port: "",
         pathname: "/**",
       },
+      {
+        protocol: 'https',
+        hostname: 'arweave.net',
+        port: "",
+        pathname: "/**",
+      },
+      {
+        protocol: 'https',
+        hostname: 'devnet.irys.xyz',
+        port: "",
+        pathname: "/**",
+      },
+      {
+        protocol: 'https',
+        hostname: 'irys.xyz',
+        port: "",
+        pathname: "/**",
+      },
+      {
+        protocol: 'https',
+        hostname: 'ipfs.io',
+        port: "",
+        pathname: "/**",
+      },
+      {
+        protocol: 'https',
+        hostname: 'nftstorage.link',
+        port: "",
+        pathname: "/**",
+      },
     ],
   }
 };

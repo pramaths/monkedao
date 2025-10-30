@@ -5,11 +5,14 @@
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
-    "start": "next start"
+    "start": "next start",
+    "test-das": "node test-das-api.js",
+    "test-candy-das": "node test-candy-machine-das.js"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
     "@hookform/resolvers": "^5.2.2",
+    "@metaplex-foundation/digital-asset-standard-api": "^1.0.6",
     "@metaplex-foundation/mpl-candy-machine": "^6.1.0",
     "@metaplex-foundation/mpl-core-candy-machine": "^0.3.0",
     "@metaplex-foundation/mpl-token-metadata": "^3.4.0",

@@ -11,11 +11,20 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { ImageGenerator } from '@/components/ImageGenerator';
-import { saveCandyMachineToDB } from '@/lib/merchant-db';
+import { saveCandyMachineToDB, saveCandyMachineItems } from '@/lib/merchant-db';
 
 const CandyMachineCreator: React.FC = () => {
   const { publicKey, connected, wallet } = useWallet();
   const { umi, signer, updateSigner } = useUmiStore();
+
+  const isValidJson = (jsonString: string): boolean => {
+    try {
+      JSON.parse(jsonString);
+      return true;
+    } catch {
+      return false;
+    }
+  };
   const [candyManager, setCandyManager] = useState<DealifiCandyMachineManager | null>(null);
   const [loading, setLoading] = useState(false);
   const [candyMachineAddress, setCandyMachineAddress] = useState<string>('');
@@ -26,9 +35,72 @@ const CandyMachineCreator: React.FC = () => {
   const [addingItems, setAddingItems] = useState(false);
   const [showFormModal, setShowFormModal] = useState(false);
   const [modalNftName, setModalNftName] = useState('');
+  const [modalDiscount, setModalDiscount] = useState('');
+  const [modalDescription, setModalDescription] = useState('');
+  const [modalImageData, setModalImageData] = useState('');
   const [modalNftUri, setModalNftUri] = useState('');
+  const [modalNftJson, setModalNftJson] = useState('');
   const [modalSubmitting, setModalSubmitting] = useState(false);
+  const [creatingUri, setCreatingUri] = useState(false);
+  const [modalInputMode, setModalInputMode] = useState<'form' | 'json'>('form');
   const [mintLoading, setMintLoading] = useState(false); // Add this line
+
+  // Prevent body scroll when modal is open
+  useEffect(() => {
+    if (showFormModal) {
+      document.body.classList.add('modal-open');
+    } else {
+      document.body.classList.remove('modal-open');
+    }
+    
+    return () => {
+      document.body.classList.remove('modal-open');
+    };
+  }, [showFormModal]);
+
+  // Create metadata via API and add to candy machine
+  const handleCreateUriAndAdd = async () => {
+    if (!modalNftName.trim() || !modalDescription.trim() || !modalDiscount.trim() || !modalImageData) {
+      toast.error('Please fill in all fields and generate/upload an image');
+      return;
+    }
+    if (!candyManager || !candyMachineAddress) {
+      toast.error('Candy machine not ready');
+      return;
+    }
+
+    try {
+      setCreatingUri(true);
+      const res = await fetch('/api/createUri', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageData: modalImageData,
+          metadata: {
+            name: modalNftName,
+            description: modalDescription,
+            attributes: [
+              { trait_type: 'Discount', value: modalDiscount }
+            ]
+          }
+        })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({} as any));
+        throw new Error(err?.error || 'Failed to create metadata');
+      }
+      const data = await res.json();
+      const uri = data?.metadataUri as string;
+      if (!uri) throw new Error('No metadataUri returned');
+
+      await handleAddSpecificItem(modalNftName, uri);
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e.message || 'Failed to upload image/metadata');
+    } finally {
+      setCreatingUri(false);
+    }
+  };
 
   const [config, setConfig] = useState<CandyMachineConfig>({
     itemsAvailable: 1000,
@@ -48,7 +120,10 @@ const CandyMachineCreator: React.FC = () => {
       limit: 5
     },
     startDate: {
-      date: Math.floor(Date.now() / 1000) + 3600 // 1 hour from now
+      date: Math.floor(Date.now() / 1000)
+    },
+    endDate: {
+      date: Math.floor((Date.now() + 30 * 24 * 60 * 60 * 1000) / 1000)
     }
   });
 
@@ -77,9 +152,32 @@ const CandyMachineCreator: React.FC = () => {
       const result = await candyManager.createCandyMachine(config, guards);
       setCandyMachineAddress(result.candyMachine.toString());
       
-      // Fetch initial status
-      const candyStatus = await candyManager.getCandyMachineStatus(result.candyMachine);
-      setStatus(candyStatus);
+      // Wait for on-chain propagation before fetching status
+      try {
+        const cmPk = new PublicKey(result.candyMachine.toString());
+        let found = false;
+        for (let i = 0; i < 10; i++) {
+          try {
+            await candyManager.getRawCandyMachineData(cmPk);
+            found = true;
+            break;
+          } catch (e: any) {
+            if (e?.name !== 'AccountNotFoundError') throw e;
+            await new Promise((r) => setTimeout(r, 5000));
+          }
+        }
+        if (!found) throw new Error('Candy machine account not found after retries');
+      } catch (e) {
+        console.warn('Propagation wait failed:', e);
+      }
+      
+      // Fetch initial status after availability
+      try {
+        const candyStatus = await candyManager.getCandyMachineStatus(result.candyMachine);
+        setStatus(candyStatus);
+      } catch (e) {
+        console.warn('Failed to fetch initial status:', e);
+      }
       
       // Save candy machine to MongoDB
       try {
@@ -101,7 +199,11 @@ const CandyMachineCreator: React.FC = () => {
       toast.success('Candy machine created successfully!');
     } catch (error: any) {
       console.error('Error creating candy machine:', error);
-      toast.error('Error creating candy machine: ' + error.message);
+      try {
+        const logs = typeof error?.getLogs === 'function' ? await error.getLogs() : (error?.logs || null);
+        if (logs) console.error('Program logs:', logs);
+      } catch {}
+      toast.error('Error creating candy machine: ' + (error?.message || 'Unknown error'));
     } finally {
       setLoading(false);
     }
@@ -130,7 +232,11 @@ const CandyMachineCreator: React.FC = () => {
       toast.success(`NFT minted successfully! Mint: ${nftMint.toString()}`);
     } catch (error: any) {
       console.error('Error minting NFT:', error);
-      toast.error('Error minting NFT: ' + error.message);
+      try {
+        const logs = typeof error?.getLogs === 'function' ? await error.getLogs() : (error?.logs || null);
+        if (logs) console.error('Program logs:', logs);
+      } catch {}
+      toast.error('Error minting NFT: ' + (error?.message || 'Unknown error'));
     } finally {
       setMintLoading(false);
     }
@@ -169,6 +275,16 @@ const CandyMachineCreator: React.FC = () => {
         status?.itemsLoaded || 0, // Use current itemsLoaded as index
         newItems.map(item => ({ name: item.name, uri: item.uri }))
       );
+      // Persist items to DB (best-effort)
+      try {
+        await saveCandyMachineItems({
+          merchantAddress: publicKey!.toString(),
+          candyMachineAddress,
+          items: newItems,
+        });
+      } catch (e) {
+        console.warn('Failed to save items to DB:', (e as any)?.message || e);
+      }
       
       setNftItems(prev => [...prev, ...newItems]);
       setNewItemName('');
@@ -200,6 +316,16 @@ const CandyMachineCreator: React.FC = () => {
         status?.itemsLoaded || 0,
         [{ name, uri }]
       );
+      // Persist item to DB (best-effort)
+      try {
+        await saveCandyMachineItems({
+          merchantAddress: publicKey!.toString(),
+          candyMachineAddress,
+          items: [{ name, uri }],
+        });
+      } catch (e) {
+        console.warn('Failed to save item to DB:', (e as any)?.message || e);
+      }
 
       setNftItems(prev => [...prev, { name, uri }]);
       await handleRefreshStatus();
@@ -584,6 +710,43 @@ const CandyMachineCreator: React.FC = () => {
                   When minting becomes available
                 </p>
               </div>
+
+              <div className="space-y-2">
+                <Label 
+                  htmlFor="endDate"
+                  className="text-lg"
+                  style={{
+                    color: "#ffff00",
+                    textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
+                  }}
+                >
+                  ⏹️ MINT END TIME
+                </Label>
+                <Input
+                  id="endDate"
+                  type="datetime-local"
+                  value={guards.endDate?.date ? new Date(guards.endDate.date * 1000).toISOString().slice(0, 16) : ''}
+                  onChange={(e) => setGuards(prev => ({
+                    ...prev,
+                    endDate: {
+                      date: Math.floor(new Date(e.target.value).getTime() / 1000)
+                    }
+                  }))}
+                  className="border-2 border-cyan-400 bg-black/30 text-white placeholder:text-gray-400"
+                  style={{
+                    boxShadow: "0 0 10px rgba(0, 255, 255, 0.3)",
+                  }}
+                />
+                <p 
+                  className="text-xs"
+                  style={{
+                    color: "#00ffff",
+                    textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
+                  }}
+                >
+                  When minting ends (default: +30 days)
+                </p>
+              </div>
             </div>
           </div>
 
@@ -617,7 +780,8 @@ const CandyMachineCreator: React.FC = () => {
                 setGuards({
                   solPayment: { lamports: 1000000000, destination: '' },
                   mintLimit: { id: 1, limit: 5 },
-                  startDate: { date: Math.floor(Date.now() / 1000) + 3600 }
+                  startDate: { date: Math.floor(Date.now() / 1000) },
+                  endDate: { date: Math.floor((Date.now() + 30 * 24 * 60 * 60 * 1000) / 1000) }
                 });
               }}
               className="text-lg py-4 border-4 border-cyan-400"
@@ -754,7 +918,12 @@ const CandyMachineCreator: React.FC = () => {
             <div className="flex gap-4">
               <Button
                 onClick={handleMintNFT}
-                disabled={mintLoading || !status?.isActive || !candyManager}
+                disabled={
+                  mintLoading ||
+                  !status?.isActive ||
+                  !candyManager ||
+                  (status && status.itemsLoaded !== status.itemsAvailable)
+                }
                 className="flex-1 text-xl py-6 border-4 border-yellow-400"
                 style={{
                   background: mintLoading
@@ -768,6 +937,12 @@ const CandyMachineCreator: React.FC = () => {
               >
                 {mintLoading ? '⏳ MINTING NFT...' : '🎯 MINT NFT'}
               </Button>
+
+              {status && status.itemsLoaded !== status.itemsAvailable && (
+                <div className="flex-1 text-sm text-red-400 self-center">
+                  Load {Math.max(0, (status.itemsAvailable - status.itemsLoaded))} more item(s) before minting.
+                </div>
+              )}
               
               <Button
                 onClick={handleRefreshStatus}
@@ -789,8 +964,16 @@ const CandyMachineCreator: React.FC = () => {
 
       {/* Modal: Add via Form */}
       {showFormModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.75)' }}>
-          <div className="w-full max-w-2xl mx-4">
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto" 
+          style={{ background: 'rgba(0,0,0,0.75)' }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowFormModal(false);
+            }
+          }}
+        >
+          <div className="w-full max-w-2xl mx-4 my-8 modal-content">
             <Card 
               className="border-4"
               style={{
@@ -816,16 +999,16 @@ const CandyMachineCreator: React.FC = () => {
                     textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
                   }}
                 >
-                  Use AI or manual upload to generate the image; the URI auto-fills below
+                  Upload NFTs by generating image and metadata, or paste full JSON
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-6">
+              <CardContent className="space-y-6 max-h-[70vh] overflow-y-auto">
                 <div className="space-y-2">
                   <Label 
                     className="text-lg"
                     style={{ color: '#ffff00', textShadow: '2px 2px 0px rgba(0,0,0,0.5)' }}
                   >
-                    🏷️ NFT NAME
+                    🏷️ DEAL / NFT NAME
                   </Label>
                   <Input
                     type="text"
@@ -837,51 +1020,188 @@ const CandyMachineCreator: React.FC = () => {
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <Label 
-                    className="text-lg"
-                    style={{ color: '#ffff00', textShadow: '2px 2px 0px rgba(0,0,0,0.5)' }}
-                  >
-                    🎨 IMAGE (AI OR MANUAL)
-                  </Label>
-                  <div className="p-3 rounded-lg border-2 border-cyan-400" style={{ background: 'rgba(0,0,0,0.4)' }}>
-                    <ImageGenerator onImageReady={(uri) => setModalNftUri(uri)} />
+                {/* Deal fields */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label 
+                      className="text-lg"
+                      style={{ color: '#ffff00', textShadow: '2px 2px 0px rgba(0,0,0,0.5)' }}
+                    >
+                      💸 DISCOUNT
+                    </Label>
+                    <Input
+                      type="text"
+                      placeholder="e.g., 20% OFF"
+                      value={modalDiscount}
+                      onChange={(e) => setModalDiscount(e.target.value)}
+                      className="border-2 border-purple-400 bg-black/30 text-white placeholder:text-gray-400"
+                      style={{ boxShadow: '0 0 10px rgba(255,0,255,0.3)' }}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label 
+                      className="text-lg"
+                      style={{ color: '#ffff00', textShadow: '2px 2px 0px rgba(0,0,0,0.5)' }}
+                    >
+                      📝 DESCRIPTION
+                    </Label>
+                    <Input
+                      type="text"
+                      placeholder="Short description"
+                      value={modalDescription}
+                      onChange={(e) => setModalDescription(e.target.value)}
+                      className="border-2 border-purple-400 bg-black/30 text-white placeholder:text-gray-400"
+                      style={{ boxShadow: '0 0 10px rgba(255,0,255,0.3)' }}
+                    />
                   </div>
                 </div>
 
+                {/* Input Mode Toggle */}
                 <div className="space-y-2">
                   <Label 
                     className="text-lg"
                     style={{ color: '#ffff00', textShadow: '2px 2px 0px rgba(0,0,0,0.5)' }}
                   >
-                    🔗 METADATA URI (AUTO-FILLED)
+                    📝 INPUT MODE
                   </Label>
-                  <Input
-                    type="text"
-                    placeholder="https://.../metadata.json"
-                    value={modalNftUri}
-                    onChange={(e) => setModalNftUri(e.target.value)}
-                    className="border-2 border-cyan-400 bg-black/30 text-white placeholder:text-gray-400"
-                    style={{ boxShadow: '0 0 10px rgba(0,255,255,0.3)' }}
-                  />
+                  <div className="flex gap-2">
+                    <Button
+                      variant={modalInputMode === 'form' ? 'default' : 'outline'}
+                      onClick={() => setModalInputMode('form')}
+                      className="flex-1"
+                      style={{
+                        background: modalInputMode === 'form' 
+                          ? 'linear-gradient(45deg, #ff00ff, #00ffff)' 
+                          : 'rgba(0,0,0,0.3)',
+                        border: '2px solid #ff00ff',
+                        color: '#ffff00',
+                        textShadow: '1px 1px 0px rgba(0,0,0,0.5)'
+                      }}
+                    >
+                      🧩 FORM MODE
+                    </Button>
+                    <Button
+                      variant={modalInputMode === 'json' ? 'default' : 'outline'}
+                      onClick={() => setModalInputMode('json')}
+                      className="flex-1"
+                      style={{
+                        background: modalInputMode === 'json' 
+                          ? 'linear-gradient(45deg, #ff00ff, #00ffff)' 
+                          : 'rgba(0,0,0,0.3)',
+                        border: '2px solid #ff00ff',
+                        color: '#ffff00',
+                        textShadow: '1px 1px 0px rgba(0,0,0,0.5)'
+                      }}
+                    >
+                      📄 JSON MODE
+                    </Button>
+                  </div>
                 </div>
 
+                {modalInputMode === 'form' ? (
+                  <>
+                    <div className="space-y-2">
+                      <Label 
+                        className="text-lg"
+                        style={{ color: '#ffff00', textShadow: '2px 2px 0px rgba(0,0,0,0.5)' }}
+                      >
+                        🎨 IMAGE (AI OR MANUAL)
+                      </Label>
+                      <div className="p-3 rounded-lg border-2 border-cyan-400 max-h-64 overflow-auto" style={{ background: 'rgba(0,0,0,0.4)' }}>
+                        <ImageGenerator onImageReady={(uri) => setModalImageData(uri)} />
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="space-y-2">
+                    <Label 
+                      className="text-lg"
+                      style={{ color: '#ffff00', textShadow: '2px 2px 0px rgba(0,0,0,0.5)' }}
+                    >
+                      📄 JSON METADATA
+                    </Label>
+                    <textarea
+                      placeholder='{"name": "My NFT", "description": "A cool NFT", "image": "https://...", "attributes": [...]}'
+                      value={modalNftJson}
+                      onChange={(e) => setModalNftJson(e.target.value)}
+                      className="w-full h-32 border-2 border-purple-400 bg-black/30 text-white placeholder:text-gray-400 p-3 rounded resize-none"
+                      style={{ 
+                        boxShadow: '0 0 10px rgba(255,0,255,0.3)',
+                        fontFamily: 'monospace'
+                      }}
+                    />
+                    <div className="flex justify-between items-center">
+                      <p 
+                        className="text-xs"
+                        style={{
+                          color: "#00ffff",
+                          textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
+                        }}
+                      >
+                        Enter complete JSON metadata for your NFT
+                      </p>
+                      {modalNftJson && (
+                        <span 
+                          className="text-xs px-2 py-1 rounded"
+                          style={{
+                            color: isValidJson(modalNftJson) ? "#00ff00" : "#ff0000",
+                            background: "rgba(0,0,0,0.3)",
+                            textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
+                          }}
+                        >
+                          {isValidJson(modalNftJson) ? "✓ Valid JSON" : "✗ Invalid JSON"}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex gap-3">
-                  <Button
-                    onClick={() => handleAddSpecificItem(modalNftName, modalNftUri)}
-                    disabled={modalSubmitting || !modalNftName.trim() || !modalNftUri.trim()}
-                    className="flex-1 text-lg py-4 border-4 border-purple-400"
-                    style={{
-                      background: modalSubmitting ? 'linear-gradient(45deg,#666,#888)' : 'linear-gradient(45deg,#ff00ff,#00ffff)',
-                      boxShadow: modalSubmitting ? 'none' : '0 0 20px rgba(255,0,255,0.8), 0 8px 0 rgba(0,0,0,0.5)',
-                      textShadow: '2px 2px 0px rgba(0,0,0,0.8)'
-                    }}
-                  >
-                    {modalSubmitting ? '⏳ ADDING...' : '🎯 ADD NFT TO CANDY MACHINE'}
-                  </Button>
+                  {modalInputMode === 'form' ? (
+                    <Button
+                      onClick={handleCreateUriAndAdd}
+                      disabled={
+                        creatingUri || 
+                        !modalNftName.trim() || 
+                        !modalDescription.trim() || 
+                        !modalDiscount.trim() ||
+                        !modalImageData
+                      }
+                      className="flex-1 text-lg py-4 border-4 border-purple-400"
+                      style={{
+                        background: creatingUri ? 'linear-gradient(45deg,#666,#888)' : 'linear-gradient(45deg,#ff00ff,#00ffff)',
+                        boxShadow: creatingUri ? 'none' : '0 0 20px rgba(255,0,255,0.8), 0 8px 0 rgba(0,0,0,0.5)',
+                        textShadow: '2px 2px 0px rgba(0,0,0,0.8)'
+                      }}
+                    >
+                      {creatingUri ? '⏳ CREATING URI...' : '🚀 CREATE METADATA & ADD'}
+                    </Button>
+                  ) : (
+                    <Button
+                      onClick={() => handleAddSpecificItem(modalNftName, modalNftJson)}
+                      disabled={modalSubmitting || !modalNftName.trim() || !modalNftJson.trim() || !isValidJson(modalNftJson)}
+                      className="flex-1 text-lg py-4 border-4 border-purple-400"
+                      style={{
+                        background: modalSubmitting ? 'linear-gradient(45deg,#666,#888)' : 'linear-gradient(45deg,#ff00ff,#00ffff)',
+                        boxShadow: modalSubmitting ? 'none' : '0 0 20px rgba(255,0,255,0.8), 0 8px 0 rgba(0,0,0,0.5)',
+                        textShadow: '2px 2px 0px rgba(0,0,0,0.8)'
+                      }}
+                    >
+                      {modalSubmitting ? '⏳ ADDING...' : '🎯 ADD NFT TO CANDY MACHINE'}
+                    </Button>
+                  )}
                   <Button
                     variant="outline"
-                    onClick={() => setShowFormModal(false)}
+                    onClick={() => {
+                      setShowFormModal(false);
+                      setModalNftName('');
+                      setModalDiscount('');
+                      setModalDescription('');
+                      setModalImageData('');
+                      setModalNftUri('');
+                      setModalNftJson('');
+                      setModalInputMode('form');
+                    }}
                     className="text-lg py-4 border-4 border-cyan-400"
                     style={{
                       background: 'linear-gradient(45deg, rgba(0,255,255,0.1), rgba(0,255,100,0.1))',
@@ -1020,7 +1340,12 @@ const CandyMachineCreator: React.FC = () => {
                 variant="outline"
                 onClick={() => {
                   setModalNftName('');
+                  setModalDiscount('');
+                  setModalDescription('');
+                  setModalImageData('');
                   setModalNftUri('');
+                  setModalNftJson('');
+                  setModalInputMode('form');
                   setShowFormModal(true);
                 }}
                 className="flex-1 text-lg py-4 border-4 border-cyan-400"
@@ -1057,9 +1382,36 @@ const CandyMachineCreator: React.FC = () => {
                         boxShadow: "0 0 10px rgba(255, 0, 255, 0.3)",
                       }}
                     >
-                      <div className="flex justify-between items-center">
-                        <span className="text-white font-semibold">{item.name}</span>
-                        <span className="text-xs text-gray-400 font-mono">{item.uri}</span>
+                      <div className="flex justify-between items-center gap-2">
+                        <div className="min-w-0">
+                          <div className="text-white font-semibold truncate max-w-[220px]" title={item.name}>{item.name}</div>
+                          <div className="text-xs text-gray-400 font-mono truncate max-w-[220px]" title={item.uri}>{item.uri}</div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            onClick={() => {
+                              navigator.clipboard.writeText(item.uri);
+                              toast.success('URI copied to clipboard');
+                            }}
+                            className="border-2 border-cyan-400 text-xs px-2 py-1"
+                            style={{
+                              background: "linear-gradient(45deg, rgba(0,255,255,0.1), rgba(0,255,100,0.1))",
+                              color: "#00ffff",
+                              textShadow: "1px 1px 0px rgba(0,0,0,0.5)"
+                            }}
+                          >
+                            📋 Copy
+                          </Button>
+                          <a
+                            href={item.uri}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs underline text-purple-300"
+                          >
+                            Open
+                          </a>
+                        </div>
                       </div>
                     </div>
                   ))}

@@ -27,7 +27,7 @@ export default function RootLayout({
       <body className={`${pixelFont.className} antialiased`}>
         <GlobalProviders>
           <Header />
-          <main className="min-h-screen container mx-auto px-4 py-12 pt-32">
+          <main className="min-h-screen container mx-auto px-4 py-12 pt-32 relative z-10">
             {children}
           </main>
           <Footer />

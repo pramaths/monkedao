@@ -2,33 +2,84 @@
 
 import DealCard from "@/components/DealCard";
 import { Button } from "@/components/ui/button";
+import { useEffect, useMemo, useState } from "react";
+import { getAllMerchantsFromDB } from "@/lib/merchant-db";
 
-// Mock data for deals with corrected image URLs
-const deals = [
-  {
-    title: "20% off Starbucks",
-    merchant: "Starbucks",
-    price: "0.1 SOL",
-    expiry: "2025-12-31",
-    imageUrl: "/images/starbucks.png",
-  },
-  {
-    title: "Flight to Goa",
-    merchant: "Skyscanner",
-    price: "0.5 SOL",
-    expiry: "2025-11-30",
-    imageUrl: "/images/flight.png",
-  },
-  {
-    title: "50% off Pizza",
-    merchant: "Pizza Hut",
-    price: "0.2 SOL",
-    expiry: "2025-12-15",
-    imageUrl: "/images/pizza.png",
-  },
-];
+type CardData = {
+  title: string;
+  merchant: string;
+  imageUrl: string;
+  price?: string;
+  expiry?: string;
+  info?: string;
+};
 
 export default function Home() {
+  const [cards, setCards] = useState<CardData[]>([]);
+  const [loading, setLoading] = useState<boolean>(false);
+
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      try {
+        const merchants = await getAllMerchantsFromDB();
+        const allCards: CardData[] = [];
+
+        for (const m of merchants) {
+          const merchantLabel = shortenAddress(m.merchantAddress);
+          for (const cm of (m.candyMachines || [])) {
+            // Choose one representative URI per candy machine
+            const uri = cm?.items?.[0]?.uri || cm?.mintedRecords?.find(r => !!r.uri)?.uri || null;
+            if (!uri) continue;
+
+            let meta: any = null;
+            try {
+              const res = await fetch(uri);
+              if (res.ok) meta = await res.json();
+            } catch (_) {}
+
+            const title = meta?.name || cm?.name || "Deal";
+            const imageUrl = meta?.image || "/images/starbucks.png";
+            const price = extractAttribute(meta, ["price", "Price", "solPrice", "amount"])?.toString();
+            const expiry = extractAttribute(meta, ["expiry", "expiryDate", "valid_till", "validTill"])?.toString();
+            const info = "You might receive one of the NFTs from this candy machine.";
+
+            allCards.push({ title, merchant: merchantLabel, imageUrl, price: price ? `${price}` : undefined, expiry, info });
+          }
+        }
+
+        setCards(allCards);
+      } catch (e) {
+        setCards([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, []);
+
+  function extractAttribute(meta: any, keys: string[]): string | number | undefined {
+    if (!meta) return undefined;
+    // direct field
+    for (const k of keys) {
+      if (typeof meta[k] !== "undefined" && meta[k] !== null) return meta[k];
+    }
+    // search attributes array
+    const attrs = Array.isArray(meta?.attributes) ? meta.attributes : [];
+    for (const key of keys) {
+      const found = attrs.find((a: any) =>
+        (a?.trait_type || a?.traitType || a?.trait || a?.key) === key
+      );
+      if (found) return found?.value;
+    }
+    return undefined;
+  }
+
+  function shortenAddress(addr: string): string {
+    if (!addr) return "";
+    return addr.length > 10 ? `${addr.slice(0, 4)}...${addr.slice(-4)}` : addr;
+  }
+
   return (
     <main className="container mx-auto px-4 py-8">
       <section className="text-center my-8 relative">
@@ -61,14 +112,18 @@ export default function Home() {
           color: "#ffff00",
           textShadow: "3px 3px 0px #00ff00, 6px 6px 0px rgba(0, 0, 0, 0.8), 0 0 20px rgba(255, 255, 0, 0.5)"
         }}>
-          ⭐ FEATURED DEALS ⭐
+          ⭐ CANDY MACHINE DEALS ⭐
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          {deals.map((deal, index) => (
+          {(loading ? Array.from({ length: 3 }) : cards).map((deal: any, index: number) => (
             <div key={index} style={{
               animation: `float ${3 + index * 0.5}s ease-in-out infinite`
             }}>
-              <DealCard {...deal} />
+              {loading ? (
+                <div className="w-full max-w-sm h-[360px] border-4 border-dashed border-cyan-400 animate-pulse" />
+              ) : (
+                <DealCard {...deal} />
+              )}
             </div>
           ))}
         </div>

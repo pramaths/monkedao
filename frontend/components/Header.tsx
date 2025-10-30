@@ -6,7 +6,7 @@ import { Button } from "./ui/button";
 
 export function Header() {
   return (
-    <header className="fixed top-0 left-0 right-0 z-50 border-b-4 border-b-green-500" style={{
+    <header className="fixed top-0 left-0 right-0 z-50 border-b-4 border-b-green-500 backdrop-blur-md" style={{
       background: "linear-gradient(135deg, rgba(0, 26, 13, 0.95) 0%, rgba(10, 46, 28, 0.95) 100%)",
       boxShadow: "0 0 20px rgba(0, 255, 100, 0.5), 0 4px 0 rgba(0, 0, 0, 0.5)"
     }}>

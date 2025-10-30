@@ -229,3 +229,14 @@ main {
   border-color: #00ffff !important;
   box-shadow: 0 0 15px rgba(0, 255, 100, 0.5) !important;
 }
+
+/* Modal scroll prevention */
+body.modal-open {
+  overflow: hidden;
+}
+
+/* Ensure modal content is scrollable */
+.modal-content {
+  max-height: 90vh;
+  overflow-y: auto;
+}

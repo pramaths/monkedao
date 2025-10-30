@@ -8,32 +8,32 @@ import {
   Signer,
   Umi,
   publicKey as umiPublicKey,
+  sol,
+  dateTime,
 } from '@metaplex-foundation/umi';
 import {
-  mplCandyMachine,
   create,
   fetchCandyMachine,
   addConfigLines,
   mintV2,
   safeFetchCandyGuard,
-  safeFetchMintCounterFromSeeds,
   route,
   getMerkleRoot,
   getMerkleProof,
   DefaultGuardSetMintArgs,
-  Creator,
   ConfigLineSettings,
   ConfigLine,
-  createCandyMachineV2,
 } from '@metaplex-foundation/mpl-candy-machine';
 import {
-  mplTokenMetadata,
   createNft,
   TokenStandard,
   fetchMetadata,
   findMetadataPda,
 } from '@metaplex-foundation/mpl-token-metadata';
-import { umi } from '@/lib/umi'; // Import the singleton Umi instance
+import { umi } from '@/lib/umi';
+import { transactionBuilder } from '@metaplex-foundation/umi';
+import { setComputeUnitLimit, setComputeUnitPrice } from '@metaplex-foundation/mpl-toolbox';
+import { updateCandyMachineAfterMint } from '@/lib/merchant-db';
 
 // Types for our candy machine setup
 export interface CandyMachineConfig {
@@ -58,6 +58,9 @@ export interface GuardConfig {
   startDate?: {
     date: number;
   };
+  endDate?: {
+    date: number;
+  };
   allowList?: string[];
 }
 
@@ -74,9 +77,7 @@ export class DealifiCandyMachineManager {
   private umi: Umi;
 
   constructor(umiInstance?: Umi) {
-    // Use provided Umi instance or fall back to singleton
     this.umi = umiInstance || umi;
-    // Ensure the Umi instance has a valid identity
     if (!this.umi.identity || !this.umi.identity.publicKey) {
       throw new Error('Umi instance does not have a valid identity. Please ensure your wallet is connected.');
     }
@@ -106,11 +107,11 @@ export class DealifiCandyMachineManager {
         throw new Error('Failed to confirm collection metadata after retries.');
       }
 
-      // Step 2: Create candy machine
-      const candyMachine = await this.createCandyMachineInternal(config, collection);
-      console.log('CandyMachine:', candyMachine.publicKey.toString());
+      console.log('Metadata PDA found:', metadataPda.toString());
 
-      // Optional: Insert items and configure guards using helper methods
+      // Step 2: Create candy machine
+      const candyMachine = await this.createCandyMachineInternal(config, collection, guards);
+      console.log('CandyMachine:', candyMachine.publicKey.toString());
 
       return {
         candyMachine: candyMachine.publicKey,
@@ -138,7 +139,7 @@ export class DealifiCandyMachineManager {
         authority: this.umi.identity,
         name: `${symbol} Collection`,
         symbol: symbol,
-        uri: 'https://arweave.net/placeholder-collection-metadata',
+        uri: 'https://devnet.irys.xyz/2ncwSrZHdzrsjh85Pmko1YM9jDUNLiVzRiXR6cZ2wGHh',
         sellerFeeBasisPoints: percentAmount(5, 2), // 5% = 500 basis points
         creators: [
           {
@@ -148,6 +149,10 @@ export class DealifiCandyMachineManager {
           },
         ],
         isCollection: true,
+        collectionDetails: {
+          __kind: 'V1',
+          size: 0,
+        },
       });
 
       await transactionBuilder.sendAndConfirm(this.umi, {send: { skipPreflight: true}});
@@ -166,15 +171,19 @@ export class DealifiCandyMachineManager {
 
   private async createCandyMachineInternal(
     config: CandyMachineConfig,
-    collection: any
+    collection: any,
+    guards?: GuardConfig
   ) {
+    // Ensure we have a valid identity
+    if (!this.umi.identity || !this.umi.identity.publicKey) {
+      throw new Error('No valid identity found. Please ensure your wallet is connected.');
+    }
+
     const candyMachine = generateSigner(this.umi);
 
     try {
-      // Compute safe lengths to satisfy Candy Machine Core constraints
       const prefixName = `${config.symbol} #`;
-      const prefixUri = 'https://arweave.net/';
-      // Program limits: name <= 32, uri <= 200
+      const prefixUri = '';
       const maxNameLen = 32;
       const maxUriLen = 200;
 
@@ -185,11 +194,37 @@ export class DealifiCandyMachineManager {
         throw new Error(`Prefix URI '${prefixUri}' exceeds ${maxUriLen} chars.`);
       }
 
+      // Build guards from provided config
+      const guardConfig: any = {};
+      if (guards?.solPayment) {
+        const dest = (guards.solPayment.destination && guards.solPayment.destination.trim().length > 0)
+          ? guards.solPayment.destination
+          : this.umi.identity.publicKey?.toString();
+        if (!dest) throw new Error('No valid identity found for destination');
+        guardConfig.solPayment = some({
+          lamports: sol((guards.solPayment.lamports || 0) / 1_000_000_000),
+          destination: publicKey(dest),
+        });
+      }
+      if (guards?.startDate?.date) {
+        guardConfig.startDate = some({
+          date: dateTime(new Date(guards.startDate.date * 1000).toISOString()),
+        });
+      }
+      if (guards?.endDate?.date) {
+        guardConfig.endDate = some({
+          date: dateTime(new Date(guards.endDate.date * 1000).toISOString()),
+        });
+      }
+      console.log('🛡️ Setting up guards:', guardConfig);
+      const guardsToUse = Object.keys(guardConfig).length > 0 ? guardConfig : undefined;
+
       const transactionBuilder = await create(this.umi, {
         candyMachine,
         collectionMint: collection.publicKey,
+        authority: this.umi.identity.publicKey,
         payer: this.umi.identity,
-        collectionUpdateAuthority: this.umi.identity,
+        collectionUpdateAuthority: this.umi.identity.publicKey,
         tokenStandard: TokenStandard.NonFungible,
         sellerFeeBasisPoints: percentAmount(5, 2),
         itemsAvailable: config.itemsAvailable,
@@ -202,73 +237,27 @@ export class DealifiCandyMachineManager {
         ],
         configLineSettings: some({
           prefixName,
-          // nameLength is the max suffix length; ensure it's non-negative
           nameLength: Math.max(0, maxNameLen - prefixName.length), 
           prefixUri,
-          // uriLength is the max suffix length; ensure it's non-negative
           uriLength: Math.max(0, maxUriLen - prefixUri.length),
           isSequential: false,
         }),
         hiddenSettings: none(),
+        ...(guardsToUse && { guards: guardsToUse }),
       });
 
       const result = await transactionBuilder.sendAndConfirm(this.umi);
       
       console.log('CandyMachine:', candyMachine.publicKey.toString());
-
-      // Verify the candy machine was created using a retry mechanism
-      // Small delay to allow RPC propagation
-      await new Promise((r) => setTimeout(r, 8000));
-      const createdCandyMachine = await this.fetchCandyMachineWithRetry(
-        candyMachine.publicKey
-      );
-
       return candyMachine;
     } catch (error) {
+      try {
+        // Attempt to surface program logs if available
+        const anyErr: any = error as any;
+        const logs = typeof anyErr?.getLogs === 'function' ? await anyErr.getLogs() : anyErr?.logs;
+        if (logs) console.error('Program logs:', logs);
+      } catch {}
       throw error;
-    }
-  }
-
-  private async addInitialConfigLines(
-    candyMachineAddress: any,
-    config: CandyMachineConfig
-  ) {
-    const configLines: ConfigLine[] = [];
-
-    // Add sample config lines with suffixes only
-    // Keep suffixes small to fit within (nameLength, uriLength)
-    for (let i = 0; i < Math.min(10, config.itemsAvailable); i++) {
-      const nameSuffix = (i + 1).toString();
-      const uriSuffix = `n${i + 1}.json`;
-
-      // Validate sizes against our configured limits: name<=32, uri<=200 with prefixes
-      if (nameSuffix.length > 32) {
-        throw new Error(`Config line name suffix too long at index ${i}`);
-      }
-      if (uriSuffix.length > 200) {
-        throw new Error(`Config line URI suffix too long at index ${i}`);
-      }
-
-      configLines.push({
-        name: nameSuffix,
-        uri: uriSuffix,
-      });
-    }
-
-    try {
-      const candyMachine = await this.fetchCandyMachineWithRetry(
-        candyMachineAddress
-      );
-
-      await addConfigLines(this.umi, {
-        candyMachine: candyMachineAddress,
-        index: candyMachine.itemsLoaded, // Use itemsLoaded as the starting index
-        configLines,
-      }).sendAndConfirm(this.umi);
-    } catch (error) {
-      throw new Error(
-        `Config lines addition failed: ${(error as any).message}.`
-      );
     }
   }
 
@@ -296,10 +285,6 @@ export class DealifiCandyMachineManager {
     await this.addConfigLinesAtIndex(candyMachineAddress, index, [line]);
   }
 
-  private async setupGuards(candyMachineAddress: any, guards: GuardConfig) {
-    console.log('Setting up guards:', guards);
-  }
-
   async mintNFT(candyMachineAddress: any, userWallet: Signer) {
     try {
       console.log('🎯 Starting NFT mint...');
@@ -308,12 +293,29 @@ export class DealifiCandyMachineManager {
       console.log('📊 Candy machine data:', {
         itemsAvailable: candyMachine.data.itemsAvailable,
         itemsRedeemed: candyMachine.itemsRedeemed,
+        itemsLoaded: candyMachine.itemsLoaded,
         remaining:
           candyMachine.data.itemsAvailable - candyMachine.itemsRedeemed,
       });
 
+      // Validate candy machine state
       if (candyMachine.itemsRedeemed >= candyMachine.data.itemsAvailable) {
         throw new Error('Candy machine is empty');
+      }
+
+      if (candyMachine.itemsLoaded === 0) {
+        throw new Error('Candy machine has no items loaded. Please add items first.');
+      }
+
+      if (candyMachine.itemsLoaded < Number(candyMachine.itemsRedeemed) + 1) {
+        throw new Error('Not enough items loaded to mint. Please add more items.');
+      }
+
+      // Candy Machine v3 requires all config lines to be fully loaded before first mint
+      if (Number(candyMachine.itemsLoaded) !== Number(candyMachine.data.itemsAvailable)) {
+        throw new Error(
+          `Candy machine must be fully loaded before minting. Loaded ${candyMachine.itemsLoaded} / ${candyMachine.data.itemsAvailable}.`
+        );
       }
 
       const candyGuard = await safeFetchCandyGuard(
@@ -321,22 +323,60 @@ export class DealifiCandyMachineManager {
         candyMachine.mintAuthority
       );
 
-      await this.validateGuardConditions(candyGuard, userWallet);
-      await this.executeGuardRoutes(candyMachine, candyGuard, userWallet);
+      console.log('🛡️ Candy guard data:', candyGuard);
+
       const mintArgs = await this.buildMintArgs(candyGuard, userWallet);
+      
+      console.log('🎯 Mint args:', mintArgs);
       const nftMint = generateSigner(this.umi);
 
       try {
-        await mintV2(this.umi, {
-          candyMachine: candyMachineAddress,
-          nftMint,
-          collectionMint: candyMachine.collectionMint,
-          collectionUpdateAuthority: this.umi.identity.publicKey,
-          payer: userWallet,
-          mintArgs,
-        }).sendAndConfirm(this.umi);
+        // For public minting, use the candy machine as the collection update authority
+        const collectionUpdateAuthority = candyMachine.authority;
+        
+        console.log('🔑 Collection update authority (candy machine):', collectionUpdateAuthority);
+        console.log('👤 Current wallet:', userWallet.publicKey);
+        console.log('🏭 Candy machine address:', candyMachineAddress);
+        
+        const { signature } = await transactionBuilder()
+          .add(setComputeUnitLimit(this.umi, { units: 1_200_000 }))
+          .add(setComputeUnitPrice(this.umi, { microLamports: 1_000 }))
+          .add(
+            mintV2(this.umi, {
+              candyMachine: candyMachineAddress,
+              nftMint,
+              collectionMint: candyMachine.collectionMint,
+              collectionUpdateAuthority: collectionUpdateAuthority,
+              payer: userWallet,
+              mintArgs,
+              tokenStandard: candyMachine.tokenStandard,
+            })
+          )
+          .sendAndConfirm(this.umi);
 
         console.log('✅ NFT minted successfully:', nftMint.publicKey);
+
+        // Try to fetch metadata URI for DB update
+        let mintedUri: string | null = null;
+        try {
+          const [metadataPda] = findMetadataPda(this.umi, { mint: nftMint.publicKey });
+          const metadata = await fetchMetadata(this.umi, metadataPda);
+          // @ts-ignore - metadata data may include uri depending on version
+          mintedUri = (metadata as any)?.data?.uri || null;
+        } catch (_) {}
+
+        // Persist minted record to DB (best-effort)
+        try {
+          await updateCandyMachineAfterMint({
+            candyMachineAddress: candyMachineAddress.toString(),
+            mint: nftMint.publicKey.toString(),
+            authority: userWallet.publicKey.toString(),
+            uri: mintedUri,
+          });
+        } catch (e) {
+          console.warn('⚠️ Failed to update DB after mint:', (e as any)?.message || e);
+        }
+
         return nftMint.publicKey;
       } catch (error) {
         console.error('❌ Error minting NFT:', error);
@@ -374,48 +414,6 @@ export class DealifiCandyMachineManager {
     throw new Error('Failed to fetch candy machine after multiple retries.');
   }
 
-  private async validateGuardConditions(candyGuard: any, userWallet: Signer) {
-    if (!candyGuard) return;
-
-    const startDate = unwrapOption(candyGuard.guards?.startDate);
-    if (
-      startDate &&
-      typeof startDate === 'object' &&
-      'date' in startDate &&
-      typeof startDate.date === 'number'
-    ) {
-      const slot = await this.umi.rpc.getSlot();
-      const solanaTime = await this.umi.rpc.getBlockTime(slot);
-
-      if (solanaTime && solanaTime < startDate.date) {
-        throw new Error('Minting has not started yet');
-      }
-    }
-  }
-
-  private async executeGuardRoutes(
-    candyMachine: any,
-    candyGuard: any,
-    userWallet: Signer
-  ) {
-    const allowList = unwrapOption(candyGuard.guards?.allowList);
-    if (allowList && Array.isArray(allowList)) {
-      if (!(await this.checkAllowListProof(candyMachine, candyGuard, userWallet, allowList))) {
-        await route(this.umi, {
-          guard: 'allowList',
-          candyMachine: candyMachine.publicKey,
-          candyGuard: candyGuard.publicKey,
-          group: 'default',
-          routeArgs: {
-            path: 'proof',
-            merkleRoot: getMerkleRoot(allowList),
-            merkleProof: getMerkleProof(allowList, userWallet.publicKey),
-          },
-        }).sendAndConfirm(this.umi);
-      }
-    }
-  }
-
   private async checkAllowListProof(
     candyMachine: any,
     candyGuard: any,
@@ -431,6 +429,9 @@ export class DealifiCandyMachineManager {
   ): Promise<Partial<DefaultGuardSetMintArgs>> {
     const mintArgs: Partial<DefaultGuardSetMintArgs> = {};
 
+    console.log('🔍 Available guards:', Object.keys(candyGuard?.guards || {}));
+
+    // Handle SOL payment guard - match the documentation structure
     const solPayment = unwrapOption(candyGuard?.guards?.solPayment);
     if (
       solPayment &&
@@ -438,11 +439,14 @@ export class DealifiCandyMachineManager {
       'destination' in solPayment &&
       typeof solPayment.destination === 'string'
     ) {
+      console.log('💰 SOL Payment guard found:', solPayment);
+      // According to docs: mintArgs should have solPayment: some({ destination: ... })
       mintArgs.solPayment = some({
         destination: publicKey(solPayment.destination),
       });
     }
 
+    console.log('🎯 Final mint args:', mintArgs);
     return mintArgs;
   }
 
@@ -459,6 +463,7 @@ export class DealifiCandyMachineManager {
       return {
         itemsAvailable: Number(candyMachine.data.itemsAvailable),
         itemsRedeemed: Number(candyMachine.itemsRedeemed),
+        itemsLoaded: candyMachine.itemsLoaded || 0,
         remaining:
           Number(candyMachine.data.itemsAvailable) -
           Number(candyMachine.itemsRedeemed),
@@ -468,6 +473,107 @@ export class DealifiCandyMachineManager {
       };
     } catch (error) {
       console.error('Error fetching candy machine status:', error);
+      throw error;
+    }
+  }
+
+  async getRawCandyMachineData(candyMachineAddress: any) {
+    try {
+      return await this.fetchCandyMachineWithRetry(candyMachineAddress);
+    } catch (error) {
+      console.error('Error fetching raw candy machine data:', error);
+      throw error;
+    }
+  }
+
+  async updateCandyMachineGuards(candyMachineAddress: any, guards: GuardConfig) {
+    try {
+      // Ensure we have a valid identity
+      if (!this.umi.identity || !this.umi.identity.publicKey) {
+        throw new Error('No valid identity found. Please ensure your wallet is connected.');
+      }
+
+      const candyMachine = await fetchCandyMachine(this.umi, candyMachineAddress);
+      
+      // Build guards from provided config
+      const guardConfig: any = {};
+      if (guards?.solPayment) {
+        const dest = (guards.solPayment.destination && guards.solPayment.destination.trim().length > 0)
+          ? guards.solPayment.destination
+          : this.umi.identity.publicKey?.toString();
+        if (!dest) throw new Error('No valid identity found for destination');
+        guardConfig.solPayment = some({
+          lamports: sol((guards.solPayment.lamports || 0) / 1_000_000_000),
+          destination: publicKey(dest),
+        });
+      }
+      if (guards?.startDate?.date) {
+        guardConfig.startDate = some({
+          date: dateTime(new Date(guards.startDate.date * 1000).toISOString()),
+        });
+      }
+      if (guards?.endDate?.date) {
+        guardConfig.endDate = some({
+          date: dateTime(new Date(guards.endDate.date * 1000).toISOString()),
+        });
+      }
+
+      console.log('🛡️ Updating guards (SOL payment + start date only):', guardConfig);
+
+      // Use the route instruction to update guards
+      const transactionBuilder = await route(this.umi, {
+        candyMachine: candyMachineAddress,
+        guard: 'default',
+        routeArgs: guardConfig,
+      });
+
+      const { signature } = await transactionBuilder.sendAndConfirm(this.umi);
+      console.log('✅ Guards updated successfully:', signature);
+      
+      return signature;
+    } catch (error) {
+      console.error('Error updating candy machine guards:', error);
+      throw error;
+    }
+  }
+
+  async checkCandyMachineHealth(candyMachineAddress: any) {
+    try {
+      const candyMachine = await fetchCandyMachine(this.umi, candyMachineAddress);
+      const candyGuard = await safeFetchCandyGuard(this.umi, candyMachine.mintAuthority);
+      
+      const health = {
+        itemsAvailable: Number(candyMachine.data.itemsAvailable),
+        itemsRedeemed: Number(candyMachine.itemsRedeemed),
+        itemsLoaded: candyMachine.itemsLoaded || 0,
+        remaining: Number(candyMachine.data.itemsAvailable) - Number(candyMachine.itemsRedeemed),
+        hasItems: (candyMachine.itemsLoaded || 0) > 0,
+        hasGuards: !!candyGuard,
+        isLive: true, // Will be determined by guard conditions
+        issues: [] as string[],
+        guards: Object.keys(candyGuard?.guards || {}),
+        authority: candyMachine.authority,
+        currentWallet: this.umi.identity?.publicKey?.toString() || null,
+        canMint: true // Anyone can mint from public candy machines
+      };
+
+      // Check for issues
+      if (health.itemsLoaded === 0) {
+        health.issues.push('No items loaded - candy machine needs items to be added');
+      }
+      
+      if (health.remaining <= 0) {
+        health.issues.push('No remaining items to mint');
+      }
+      
+      if (!health.hasGuards) {
+        health.issues.push('No guards configured - may cause minting issues');
+      }
+
+      console.log('🏥 Candy machine health check:', health);
+      return health;
+    } catch (error) {
+      console.error('Error checking candy machine health:', error);
       throw error;
     }
   }

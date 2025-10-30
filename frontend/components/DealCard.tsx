@@ -8,9 +8,10 @@ import { Tag, Clock } from "lucide-react";
 type DealCardProps = {
   title: string;
   merchant: string;
-  price: string;
-  expiry: string;
   imageUrl: string;
+  price?: string;
+  expiry?: string;
+  info?: string;
 };
 
 const DealCard = ({
@@ -18,6 +19,7 @@ const DealCard = ({
   merchant,
   price,
   expiry,
+  info,
   imageUrl,
 }: DealCardProps) => {
   return (
@@ -33,6 +35,19 @@ const DealCard = ({
     >
       <CardHeader className="p-0">
         <div className="relative h-56 overflow-hidden">
+          {info ? (
+            <div
+              className="absolute top-2 right-2 z-20 rounded-full px-2 py-1 text-xs font-semibold"
+              style={{
+                background: "rgba(0,0,0,0.6)",
+                border: "1px solid #00ffff",
+                color: "#00ffff",
+              }}
+              title={info}
+            >
+              i
+            </div>
+          ) : null}
           <div style={{
             position: "absolute",
             top: 0,
@@ -72,32 +87,36 @@ const DealCard = ({
           🏪 {merchant}
         </p>
         <div className="flex flex-col gap-3">
-          <div className="flex items-center gap-2 px-3 py-2" style={{
-            background: "rgba(0, 255, 100, 0.2)",
-            border: "2px solid #00ff00",
-            boxShadow: "0 0 10px rgba(0, 255, 100, 0.5)"
-          }}>
-            <Tag className="h-5 w-5" style={{ color: "#ffff00" }} />
-            <span className="text-lg font-bold" style={{
-              color: "#ffff00",
-              textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)"
+          {typeof price !== 'undefined' && price !== '' ? (
+            <div className="flex items-center gap-2 px-3 py-2" style={{
+              background: "rgba(0, 255, 100, 0.2)",
+              border: "2px solid #00ff00",
+              boxShadow: "0 0 10px rgba(0, 255, 100, 0.5)"
             }}>
-              {price}
-            </span>
-          </div>
-          <div className="flex items-center gap-2 px-3 py-2" style={{
-            background: "rgba(0, 255, 255, 0.2)",
-            border: "2px solid #00ffff",
-            boxShadow: "0 0 10px rgba(0, 255, 255, 0.5)"
-          }}>
-            <Clock className="h-5 w-5" style={{ color: "#00ffff" }} />
-            <span className="text-xs" style={{
-              color: "#00ffff",
-              textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)"
+              <Tag className="h-5 w-5" style={{ color: "#ffff00" }} />
+              <span className="text-lg font-bold" style={{
+                color: "#ffff00",
+                textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)"
+              }}>
+                {price}
+              </span>
+            </div>
+          ) : null}
+          {typeof expiry !== 'undefined' && expiry !== '' ? (
+            <div className="flex items-center gap-2 px-3 py-2" style={{
+              background: "rgba(0, 255, 255, 0.2)",
+              border: "2px solid #00ffff",
+              boxShadow: "0 0 10px rgba(0, 255, 255, 0.5)"
             }}>
-              ⏰ {expiry}
-            </span>
-          </div>
+              <Clock className="h-5 w-5" style={{ color: "#00ffff" }} />
+              <span className="text-xs" style={{
+                color: "#00ffff",
+                textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)"
+              }}>
+                ⏰ {expiry}
+              </span>
+            </div>
+          ) : null}
         </div>
       </CardContent>
       <CardFooter>

@@ -33,24 +33,15 @@ import {
 } from "@/components/ui/card";
 import { ImageGenerator } from "@/components/ImageGenerator";
 import { useRouter } from "next/navigation";
-import { BN } from "@coral-xyz/anchor";
 import useUmiStore from "@/store/useUmiStore";
-import { publicKey } from "@metaplex-foundation/umi";
+import { saveCandyMachineItems } from "@/lib/merchant-db";
 
 const formSchema = z.object({
-  dealName: z.string().min(2, "Deal name must be at least 2 characters."),
-  dealDescription: z.string().min(10, "Description must be at least 10 characters."),
-  discount: z.number().min(1).max(100, "Discount must be between 1-100%"),
-  price: z.number().min(0, "Price must be 0 or more"),
-  totalSupply: z.number().min(1, "Supply must be at least 1"),
-  expiryDays: z.number().min(1, "Expiry must be at least 1 day"),
-  redemptionRule: z.string().min(5, "Redemption rule must be at least 5 characters"),
-  geoTag: z.string().optional(),
-  category: z.string().optional(),
-  imageData: z.string().min(1, "Please generate or upload an image."),
   candyMachineAddress: z.string().min(1, "Please select a candy machine."),
   nftName: z.string().min(1, "NFT name is required."),
-  nftUri: z.string().min(1, "NFT metadata URI is required."),
+  discount: z.string().min(1, "Discount is required."),
+  description: z.string().min(1, "Description is required."),
+  imageData: z.string().min(1, "Please generate or upload an image."),
 });
 
 export default function CreateDealPage() {
@@ -66,19 +57,11 @@ export default function CreateDealPage() {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      dealName: "",
-      dealDescription: "",
-      discount: 20,
-      price: 0,
-      totalSupply: 100,
-      expiryDays: 30,
-      redemptionRule: "",
-      geoTag: "",
-      category: "",
-      imageData: "",
       candyMachineAddress: "",
       nftName: "",
-      nftUri: "",
+      discount: "",
+      description: "",
+      imageData: "",
     },
   });
 
@@ -111,63 +94,20 @@ export default function CreateDealPage() {
   };
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
-    console.log("🎯 Merchant onSubmit called with state:", {
-      hasProgram: !!program,
-      publicKey: walletPublicKey?.toString(),
-      hasMerchantPda: !!merchantPda,
-      hasMerchantData: !!merchantData,
-      isUmiReady
-    });
-
-    if (
-      !program ||
-      !walletPublicKey ||
-      !merchantPda ||
-      !merchantData ||
-      !isUmiReady
-    ) {
-      console.error("❌ Missing requirements:", {
-        hasProgram: !!program,
-        hasPublicKey: !!walletPublicKey,
-        hasMerchantPda: !!merchantPda,
-        hasMerchantData: !!merchantData,
-        isUmiReady
-      });
-      toast.error("⚠️ Please connect your wallet and ensure you're a merchant!");
+    if (!isUmiReady) {
+      toast.error("⚠️ Please connect your wallet!");
       return;
     }
 
-    console.log("✅ All requirements met, starting deal creation...");
     setCreating(true);
     try {
       const {
-        dealName,
-        dealDescription,
-        imageData,
-        discount,
-        price,
-        totalSupply,
-        expiryDays,
-        redemptionRule,
-        geoTag,
-        category,
         candyMachineAddress,
         nftName,
-        nftUri,
-      } = values;
-
-      console.log("📋 Merchant form values:", {
-        dealName,
-        dealDescription,
         discount,
-        price,
-        totalSupply,
-        expiryDays,
-        redemptionRule,
-        geoTag,
-        category,
-        hasImageData: !!imageData
-      });
+        description,
+        imageData,
+      } = values;
 
       // 1. Validate candy machine address
       let candyMachinePubkey;
@@ -177,87 +117,68 @@ export default function CreateDealPage() {
         throw new Error("Invalid candy machine address format");
       }
 
-      // 2. Derive deal PDA using merchant's total deals count
-      const totalDealsNumber = merchantData.totalDeals.toNumber();
-      const totalDealsBuffer = Buffer.alloc(8);
-      totalDealsBuffer.writeUInt32LE(totalDealsNumber, 0);
-
-      const [dealPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("deal"), merchantPda.toBuffer(), totalDealsBuffer],
-        program.programId
-      );
-
-      // 3. Derive deal authority PDA
-      const [dealAuthorityPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("deal_authority"), dealPda.toBuffer()],
-        program.programId
-      );
-
-      // 4. Add NFT to candy machine using addConfigLines
-      toast.info("🎨 Adding NFT to candy machine...");
+      // 2. Create metadata URI using createUri API
+      toast.info("🎨 Creating NFT metadata...");
       
-      // Import candy machine manager
+      const res = await fetch('/api/createUri', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageData: imageData,
+          metadata: {
+            name: nftName,
+            description: description,
+            attributes: [
+              { trait_type: 'Discount', value: discount }
+            ]
+          }
+        })
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({} as any));
+        throw new Error(err?.error || 'Failed to create metadata');
+      }
+
+      const data = await res.json();
+      const metadataUri = data?.metadataUri as string;
+      if (!metadataUri) throw new Error('No metadataUri returned');
+
+      // 3. Add NFT to candy machine using addConfigLines
+      toast.info("🍭 Adding NFT to candy machine...");
+      
       const { DealifiCandyMachineManager } = await import("@/lib/candy-machine-manager");
       const candyManager = new DealifiCandyMachineManager(umi);
       
-      // Add the NFT item to the candy machine
       await candyManager.addConfigLinesAtIndex(
         candyMachinePubkey,
         0, // Add at index 0, or use itemsLoaded if available
-        [{ name: nftName, uri: nftUri }]
+        [{ name: nftName, uri: metadataUri }]
       );
+
+      // 4. Persist the item to MongoDB (best-effort)
+      try {
+        await saveCandyMachineItems({
+          merchantAddress: walletPublicKey!.toString(),
+          candyMachineAddress: candyMachineAddress,
+          items: [{ name: nftName, uri: metadataUri }],
+        });
+      } catch (e: any) {
+        console.warn('Failed to save item to DB:', e?.message || e);
+      }
       
-      toast.success("NFT added to candy machine successfully!");
-
-      // 5. Create Deal on-chain
-      toast.info("⛓️ Creating deal on blockchain...");
-      const expiryTimestamp = Math.floor(Date.now() / 1000) + expiryDays * 86400;
-      const priceInLamports = new BN(price * LAMPORTS_PER_SOL);
-
-      // Create deal parameters matching the Anchor program
-      const createDealParams = {
-        candyMachine: candyMachinePubkey,
-        collectionMint: candyMachinePubkey, // Using candy machine as collection mint for now
-        namePrefix: nftName,
-        uriPrefix: nftUri,
-        itemsAvailable: new BN(totalSupply),
-        goLiveDate: null,
-        endDate: new BN(expiryTimestamp),
-        priceLamports: priceInLamports,
-        payoutWallet: merchantData.treasury,
-        allowlistMerkleRoot: null,
-      };
-
-      const tx = await program.methods
-        .createDeal(createDealParams)
-        .accountsStrict({
-          authority: walletPublicKey,
-          merchant: merchantPda,
-          deal: dealPda,
-          dealAuthority: dealAuthorityPda,
-          systemProgram: SystemProgram.programId,
-        })
-        .rpc();
-
       toast.success(
         <div>
-          <p className="font-bold">🎉 DEAL CREATED!</p>
-          <a
-            href={`https://explorer.solana.com/tx/${tx}?cluster=devnet`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-cyan-400 hover:underline text-sm"
-          >
-            View on Explorer
-          </a>
+          <p className="font-bold">🎉 NFT ADDED TO CANDY MACHINE!</p>
+          <p className="text-sm">Metadata URI: {metadataUri}</p>
         </div>
       );
 
       form.reset();
       setTimeout(() => router.push("/merchant"), 2000);
     } catch (error: any) {
-      console.error("Failed to create deal:", error);
-      toast.error(`❌ Failed to create deal: ${error.message}`);
+      console.error("Failed to add NFT:", error);
+      toast.error(`❌ Failed to add NFT: ${error.message}`);
     } finally {
       setCreating(false);
     }
@@ -312,7 +233,7 @@ export default function CreateDealPage() {
                 "3px 3px 0px #00ff00, 6px 6px 0px rgba(0, 0, 0, 0.5)",
             }}
           >
-            🎯 CREATE NEW DEAL
+            🎨 ADD NFT TO CANDY MACHINE
           </CardTitle>
           <CardDescription
             className="text-center text-base"
@@ -321,334 +242,12 @@ export default function CreateDealPage() {
               textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
             }}
           >
-            ⚡ PUBLISH A DEAL ON THE BLOCKCHAIN ⚡
+            ⚡ UPLOAD IMAGE, CREATE METADATA, AND ADD TO YOUR COLLECTION ⚡
           </CardDescription>
         </CardHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
             <CardContent className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <FormField
-                  control={form.control}
-                  name="dealName"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel
-                        className="text-lg"
-                        style={{
-                          color: "#ffff00",
-                          textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
-                        }}
-                      >
-                        💎 DEAL NAME
-                      </FormLabel>
-                      <FormControl>
-                        <Input
-                          placeholder="E.g. 50% Off Coffee"
-                          {...field}
-                          className="border-2 border-cyan-400 bg-black/30 text-white placeholder:text-gray-400"
-                          style={{
-                            boxShadow: "0 0 10px rgba(0, 255, 255, 0.3)",
-                          }}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="discount"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel
-                        className="text-lg"
-                        style={{
-                          color: "#ffff00",
-                          textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
-                        }}
-                      >
-                        🏷️ DISCOUNT %
-                      </FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          placeholder="20"
-                          {...field}
-                          onChange={(e) =>
-                            field.onChange(parseInt(e.target.value))
-                          }
-                          className="border-2 border-cyan-400 bg-black/30 text-white placeholder:text-gray-400"
-                          style={{
-                            boxShadow: "0 0 10px rgba(0, 255, 255, 0.3)",
-                          }}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <FormField
-                control={form.control}
-                name="dealDescription"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel
-                      className="text-lg"
-                      style={{
-                        color: "#ffff00",
-                        textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
-                      }}
-                    >
-                      📝 DESCRIPTION
-                    </FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="A brief description of your deal."
-                        {...field}
-                        className="border-2 border-cyan-400 bg-black/30 text-white placeholder:text-gray-400"
-                        style={{
-                          boxShadow: "0 0 10px rgba(0, 255, 255, 0.3)",
-                        }}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <FormField
-                  control={form.control}
-                  name="price"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel
-                        className="text-lg"
-                        style={{
-                          color: "#ffff00",
-                          textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
-                        }}
-                      >
-                        💰 PRICE (SOL)
-                      </FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          placeholder="0"
-                          {...field}
-                          onChange={(e) =>
-                            field.onChange(parseFloat(e.target.value))
-                          }
-                          className="border-2 border-cyan-400 bg-black/30 text-white placeholder:text-gray-400"
-                          style={{
-                            boxShadow: "0 0 10px rgba(0, 255, 255, 0.3)",
-                          }}
-                        />
-                      </FormControl>
-                      <FormDescription
-                        style={{
-                          color: "#00ffff",
-                          fontSize: "0.75rem",
-                        }}
-                      >
-                        💡 Set to 0 for free deals
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="totalSupply"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel
-                        className="text-lg"
-                        style={{
-                          color: "#ffff00",
-                          textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
-                        }}
-                      >
-                        📦 SUPPLY
-                      </FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          placeholder="100"
-                          {...field}
-                          onChange={(e) =>
-                            field.onChange(parseInt(e.target.value))
-                          }
-                          className="border-2 border-cyan-400 bg-black/30 text-white placeholder:text-gray-400"
-                          style={{
-                            boxShadow: "0 0 10px rgba(0, 255, 255, 0.3)",
-                          }}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <FormField
-                  control={form.control}
-                  name="expiryDays"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel
-                        className="text-lg"
-                        style={{
-                          color: "#ffff00",
-                          textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
-                        }}
-                      >
-                        ⏰ EXPIRY (DAYS)
-                      </FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          placeholder="30"
-                          {...field}
-                          onChange={(e) =>
-                            field.onChange(parseInt(e.target.value))
-                          }
-                          className="border-2 border-cyan-400 bg-black/30 text-white placeholder:text-gray-400"
-                          style={{
-                            boxShadow: "0 0 10px rgba(0, 255, 255, 0.3)",
-                          }}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="category"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel
-                        className="text-lg"
-                        style={{
-                          color: "#ffff00",
-                          textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
-                        }}
-                      >
-                        🏷️ CATEGORY
-                      </FormLabel>
-                      <FormControl>
-                        <Input
-                          placeholder="E.g. Coffee, Food, Travel"
-                          {...field}
-                          className="border-2 border-cyan-400 bg-black/30 text-white placeholder:text-gray-400"
-                          style={{
-                            boxShadow: "0 0 10px rgba(0, 255, 255, 0.3)",
-                          }}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <FormField
-                control={form.control}
-                name="redemptionRule"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel
-                      className="text-lg"
-                      style={{
-                        color: "#ffff00",
-                        textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
-                      }}
-                    >
-                      ✅ REDEMPTION RULES
-                    </FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="E.g. Valid at all locations, Show QR code"
-                        {...field}
-                        className="border-2 border-cyan-400 bg-black/30 text-white placeholder:text-gray-400"
-                        style={{
-                          boxShadow: "0 0 10px rgba(0, 255, 255, 0.3)",
-                        }}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="geoTag"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel
-                      className="text-lg"
-                      style={{
-                        color: "#ffff00",
-                        textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
-                      }}
-                    >
-                      📍 LOCATION (Optional)
-                    </FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="E.g. San Francisco, CA"
-                        {...field}
-                        className="border-2 border-cyan-400 bg-black/30 text-white placeholder:text-gray-400"
-                        style={{
-                          boxShadow: "0 0 10px rgba(0, 255, 255, 0.3)",
-                        }}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="imageData"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel
-                      className="text-lg"
-                      style={{
-                        color: "#ffff00",
-                        textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
-                      }}
-                    >
-                      🎨 DEAL IMAGE
-                    </FormLabel>
-                    <FormControl>
-                      <ImageGenerator onImageReady={field.onChange} />
-                    </FormControl>
-                    <FormDescription
-                      style={{
-                        color: "#00ffff",
-                        textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
-                      }}
-                    >
-                      🤖 Generate with AI or upload manually
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
               {/* Candy Machine Selection */}
               <FormField
                 control={form.control}
@@ -720,7 +319,7 @@ export default function CreateDealPage() {
 
                 <FormField
                   control={form.control}
-                  name="nftUri"
+                  name="discount"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel
@@ -730,11 +329,11 @@ export default function CreateDealPage() {
                           textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
                         }}
                       >
-                        🔗 NFT METADATA URI
+                        💸 DISCOUNT
                       </FormLabel>
                       <FormControl>
                         <Input
-                          placeholder="https://example.com/nft-metadata.json"
+                          placeholder="e.g., 20% OFF"
                           {...field}
                           className="border-2 border-purple-400 bg-black/30 text-white placeholder:text-gray-400"
                           style={{
@@ -742,19 +341,70 @@ export default function CreateDealPage() {
                           }}
                         />
                       </FormControl>
-                      <FormDescription
-                        style={{
-                          color: "#00ffff",
-                          textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
-                        }}
-                      >
-                        📄 JSON metadata URI for the NFT
-                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
               </div>
+
+              <FormField
+                control={form.control}
+                name="description"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel
+                      className="text-lg"
+                      style={{
+                        color: "#ffff00",
+                        textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
+                      }}
+                    >
+                      📝 DESCRIPTION
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="A brief description of your NFT deal"
+                        {...field}
+                        className="border-2 border-purple-400 bg-black/30 text-white placeholder:text-gray-400"
+                        style={{
+                          boxShadow: "0 0 10px rgba(255, 0, 255, 0.3)",
+                        }}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="imageData"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel
+                      className="text-lg"
+                      style={{
+                        color: "#ffff00",
+                        textShadow: "2px 2px 0px rgba(0, 0, 0, 0.5)",
+                      }}
+                    >
+                      🎨 NFT IMAGE
+                    </FormLabel>
+                    <FormControl>
+                      <ImageGenerator onImageReady={field.onChange} />
+                    </FormControl>
+                    <FormDescription
+                      style={{
+                        color: "#00ffff",
+                        textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)",
+                      }}
+                    >
+                      🤖 Generate with AI or upload manually
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
             </CardContent>
 
             <div className="px-6 pb-6">
@@ -772,7 +422,7 @@ export default function CreateDealPage() {
                   textShadow: "2px 2px 0px rgba(0, 0, 0, 0.8)",
                 }}
               >
-                {creating ? "⏳ CREATING..." : "🚀 CREATE DEAL"}
+                {creating ? "⏳ ADDING NFT..." : "🚀 ADD NFT TO CANDY MACHINE"}
               </Button>
             </div>
           </form>
