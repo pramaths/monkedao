@@ -12,6 +12,7 @@ type DealCardProps = {
   price?: string;
   expiry?: string;
   info?: string;
+  onClick?: () => void;
 };
 
 const DealCard = ({
@@ -21,6 +22,7 @@ const DealCard = ({
   expiry,
   info,
   imageUrl,
+  onClick,
 }: DealCardProps) => {
   return (
     <Card 
@@ -128,6 +130,7 @@ const DealCard = ({
             textShadow: "2px 2px 0px rgba(0, 0, 0, 0.8)",
             transition: "transform 0.1s"
           }}
+          onClick={onClick}
           onMouseDown={(e) => {
             e.currentTarget.style.transform = "translateY(3px)";
             e.currentTarget.style.boxShadow = "0 0 15px rgba(0, 255, 100, 0.8), 0 3px 0 rgba(0, 0, 0, 0.5)";

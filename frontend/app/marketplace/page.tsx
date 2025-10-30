@@ -93,7 +93,7 @@ export default function MarketplacePage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-black">
       <div className="container mx-auto px-4 py-8">
-        <Toaster position="top-center" richColors />
+        <Toaster position="bottom-right" richColors />
         <div className="text-center mb-8">
           <h1 
             className="text-5xl font-bold mb-4"

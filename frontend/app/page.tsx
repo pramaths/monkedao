@@ -4,6 +4,7 @@ import DealCard from "@/components/DealCard";
 import { Button } from "@/components/ui/button";
 import { useEffect, useMemo, useState } from "react";
 import { getAllMerchantsFromDB } from "@/lib/merchant-db";
+import { useRouter } from "next/navigation";
 
 type CardData = {
   title: string;
@@ -17,6 +18,7 @@ type CardData = {
 export default function Home() {
   const [cards, setCards] = useState<CardData[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
+  const router = useRouter();
 
   useEffect(() => {
     const load = async () => {
@@ -122,7 +124,7 @@ export default function Home() {
               {loading ? (
                 <div className="w-full max-w-sm h-[360px] border-4 border-dashed border-cyan-400 animate-pulse" />
               ) : (
-                <DealCard {...deal} />
+                <DealCard {...deal} onClick={() => router.push('/marketplace')} />
               )}
             </div>
           ))}
