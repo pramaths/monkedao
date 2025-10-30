@@ -13,7 +13,7 @@ export const useCandyMachine = () => {
   // Initialize candy manager when wallet connects and signer is available
   useEffect(() => {
     if (connected && publicKey && signer && umi) {
-      const manager = new DealifiCandyMachineManager(umi, signer);
+      const manager = new DealifiCandyMachineManager(umi);
       setCandyManager(manager);
       setError(null);
     } else {

@@ -3,12 +3,7 @@
 import { useState, useEffect } from "react";
 import { useUmiWallet } from "@/hooks/useUmiWallet";
 import { useDealifiProgram } from "@/components/DealifiProgramProvider";
-import { PublicKey, SystemProgram, LAMPORTS_PER_SOL } from "@solana/web3.js";
-import {
-  createDealMetadata,
-  createClientProgrammableNFT,
-  delegateAndTransferNFTS,
-} from "@/lib/nft-utils";
+import { PublicKey } from "@solana/web3.js";
 import { toast, Toaster } from "sonner";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";

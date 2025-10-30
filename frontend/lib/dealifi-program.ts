@@ -429,13 +429,13 @@ export type DealifiCandy = {
   "errors": [
     {
       "code": 6000,
-      "name": "nameTooLong",
-      "msg": "Name prefix too long"
+      "name": "alreadyStaked",
+      "msg": "NFT is already staked"
     },
     {
       "code": 6001,
-      "name": "uriTooLong",
-      "msg": "URI prefix too long"
+      "name": "notStaked",
+      "msg": "NFT is not staked"
     }
   ],
   "types": [

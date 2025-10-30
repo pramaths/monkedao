@@ -187,7 +187,7 @@ export default function MerchantPage() {
       }
       const txSig = await program.methods
         .createMerchant(treasury, merchantName)
-        .accounts({
+        .accountsStrict({
           authority: publicKey,
           payer: publicKey,
           merchant: merchantPda,

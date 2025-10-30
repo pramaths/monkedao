@@ -103,7 +103,7 @@ FormLabel.displayName = "FormLabel"
 
 const FormControl = React.forwardRef<
   React.ElementRef<"div">,
-  React.HTMLAttributes<"div">
+  React.ComponentPropsWithoutRef<"div">
 >(({ ...props }, ref) => {
   const { error, formItemId, formDescriptionId, formMessageId } = useFormField()
 

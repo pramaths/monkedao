@@ -4,9 +4,9 @@ import { AnchorProvider, Program, setProvider } from "@coral-xyz/anchor";
 import { useAnchorWallet, useConnection } from "@solana/wallet-adapter-react";
 import { ReactNode, createContext, useContext, useMemo } from "react";
 import IDL from "@/lib/dealifi_idl.json";
-import { Dealifi } from "@/lib/dealifi-program";
+import { DealifiCandy } from "@/lib/dealifi-program";
 type DealifiProgramContextType = {
-  program: Program<Dealifi> | null;
+  program: Program<DealifiCandy> | null;
   provider: AnchorProvider | null;
 };
 
@@ -31,7 +31,7 @@ export const DealifiProgramProvider = ({ children }: { children: ReactNode }) =>
     });
     setProvider(provider);
 
-    const program = new Program<Dealifi>(IDL as Dealifi, provider);
+    const program = new Program<DealifiCandy>(IDL as DealifiCandy, provider);
 
     return { program, provider };
   }, [connection, wallet]);
