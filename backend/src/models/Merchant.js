@@ -31,7 +31,7 @@ const CandyMachineSchema = new mongoose.Schema(
     items: { type: [CandyMachineItemSchema], default: [] },
     // Guard-derived fields
     priceLamports: { type: Number },
-    priceSol: { type: Number },
+    priceSol: { type: String },
     guardStartDate: { type: Number }, // unix seconds
     guardEndDate: { type: Number },   // unix seconds
     guardDestination: { type: String },

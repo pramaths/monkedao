@@ -46,7 +46,7 @@ export default function Home() {
             // Prefer stored guard price/start from DB; fall back to metadata if needed
             const priceSolFromDb = (cm as any)?.priceSol as number | undefined;
             const priceAttr = extractAttribute(meta, ["price", "Price", "solPrice", "amount"]) as any;
-            const price = typeof priceSolFromDb === 'number' ? `${priceSolFromDb} SOL` : (priceAttr ? String(priceAttr) : undefined);
+            const price = typeof priceSolFromDb === 'string' ? `${priceSolFromDb} SOL` : (priceAttr ? String(priceAttr) : undefined);
             const startDateFromDb = (cm as any)?.guardStartDate as number | undefined;
             const expiryAttr = extractAttribute(meta, ["expiry", "expiryDate", "valid_till", "validTill"]) as any;
             const expiry = typeof startDateFromDb === 'number' && startDateFromDb > 0
