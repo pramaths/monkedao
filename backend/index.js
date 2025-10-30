@@ -25,6 +25,9 @@ mongoose
     process.exit(1);
   });
 
+app.get('/', (req, res) => {
+  res.send('Dealifi Backend is running');
+});
 app.use('/api', routes);
 
 const port = process.env.PORT || 4000;
