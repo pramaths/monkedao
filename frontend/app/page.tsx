@@ -13,6 +13,7 @@ type CardData = {
   price?: string;
   expiry?: string;
   info?: string;
+  address: string;
 };
 
 export default function Home() {
@@ -46,7 +47,7 @@ export default function Home() {
             const expiry = extractAttribute(meta, ["expiry", "expiryDate", "valid_till", "validTill"])?.toString();
             const info = "You might receive one of the NFTs from this candy machine.";
 
-            allCards.push({ title, merchant: merchantLabel, imageUrl, price: price ? `${price}` : undefined, expiry, info });
+            allCards.push({ title, merchant: merchantLabel, imageUrl, price: price ? `${price}` : undefined, expiry, info, address: cm.address });
           }
         }
 
@@ -124,7 +125,7 @@ export default function Home() {
               {loading ? (
                 <div className="w-full max-w-sm h-[360px] border-4 border-dashed border-cyan-400 animate-pulse" />
               ) : (
-                <DealCard {...deal} onClick={() => router.push('/marketplace')} />
+                <DealCard {...deal} onClick={() => router.push(`/candy-machine/${deal.address}`)} />
               )}
             </div>
           ))}
