@@ -29,6 +29,12 @@ const CandyMachineSchema = new mongoose.Schema(
     description: { type: String },
     mintedRecords: { type: [MintedRecordSchema], default: [] },
     items: { type: [CandyMachineItemSchema], default: [] },
+    // Guard-derived fields
+    priceLamports: { type: Number },
+    priceSol: { type: Number },
+    guardStartDate: { type: Number }, // unix seconds
+    guardEndDate: { type: Number },   // unix seconds
+    guardDestination: { type: String },
     updatedAt: { type: String },
   },
   { _id: false }

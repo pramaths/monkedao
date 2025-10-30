@@ -51,12 +51,17 @@ export async function POST(request: NextRequest) {
     });
 
     // ** Upload metadata to Arweave **
+    const baseAttributes = Array.isArray(metadata.attributes) ? metadata.attributes : [];
     const updatedMetadata = {
       name: metadata.name,
       description: metadata.description,
       image: imageUri[0],
       external_url: "https://dealifi.com",
-      attributes: metadata.attributes || [],
+      // Ensure a redeemed flag is present for downstream logic
+      attributes: [
+        ...baseAttributes,
+        { trait_type: "redeemed", value: "false" },
+      ],
       properties: {
         files: [
           {

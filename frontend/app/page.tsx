@@ -43,8 +43,15 @@ export default function Home() {
 
             const title = meta?.name || cm?.name || "Deal";
             const imageUrl = meta?.image || "/images/starbucks.png";
-            const price = extractAttribute(meta, ["price", "Price", "solPrice", "amount"])?.toString();
-            const expiry = extractAttribute(meta, ["expiry", "expiryDate", "valid_till", "validTill"])?.toString();
+            // Prefer stored guard price/start from DB; fall back to metadata if needed
+            const priceSolFromDb = (cm as any)?.priceSol as number | undefined;
+            const priceAttr = extractAttribute(meta, ["price", "Price", "solPrice", "amount"]) as any;
+            const price = typeof priceSolFromDb === 'number' ? `${priceSolFromDb} SOL` : (priceAttr ? String(priceAttr) : undefined);
+            const startDateFromDb = (cm as any)?.guardStartDate as number | undefined;
+            const expiryAttr = extractAttribute(meta, ["expiry", "expiryDate", "valid_till", "validTill"]) as any;
+            const expiry = typeof startDateFromDb === 'number' && startDateFromDb > 0
+              ? `Starts ${new Date(startDateFromDb * 1000).toLocaleString()}`
+              : (expiryAttr ? String(expiryAttr) : undefined);
             const info = "You might receive one of the NFTs from this candy machine.";
 
             allCards.push({ title, merchant: merchantLabel, imageUrl, price: price ? `${price}` : undefined, expiry, info, address: cm.address });

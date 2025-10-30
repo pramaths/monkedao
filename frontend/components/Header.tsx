@@ -55,6 +55,18 @@ export function Header() {
               🍭 CANDY MACHINE
             </Button>
           </Link>
+          <Link href="/transfer">
+            <Button 
+              variant="outline"
+              className="h-8 px-3 py-1 text-xs border-2 border-yellow-400 text-yellow-400 hover:bg-yellow-400 hover:text-black transition-all duration-150"
+              style={{
+                boxShadow: "0 0 8px rgba(255, 255, 0, 0.5)",
+                textShadow: "1px 1px 0px rgba(0, 0, 0, 0.5)"
+              }}
+            >
+              ↗ Transfer
+            </Button>
+          </Link>
           <div className="wallet-button-pixel">
             <WalletMultiButton />
           </div>

@@ -42,6 +42,8 @@ export default function MerchantPage() {
     } else {
       setCandyMachineData([]);
     }
+    // Total deals equals total candy machines
+    setTotalDeals(myCandyMachines.length);
   }, [myCandyMachines]);
 
   const fetchCandyMachineDetails = async () => {
@@ -58,7 +60,28 @@ export default function MerchantPage() {
       const candyManager = new DealifiCandyMachineManager(umi);
       const statuses = await Promise.allSettled(
         myCandyMachines.map(async (cm) => {
-          const status = await candyManager.getCandyMachineStatus(new PublicKey(cm.address));
+          const status: any = await candyManager.getCandyMachineStatus(new PublicKey(cm.address));
+          const guards: any = status?.guards || {};
+          const nowSec = Math.floor(Date.now() / 1000);
+          const nextMonthSec = Math.floor((Date.now() + 30 * 24 * 60 * 60 * 1000) / 1000);
+
+          const getUnixFromGuard = (g: any): number | null => {
+            if (!g) return null;
+            // Try common shapes
+            // Some({ date: DateTime }) or direct { date: string | number }
+            const val = (g?.value || g)?.date || (g?.date ?? null);
+            if (!val) return null;
+            try {
+              if (typeof val === 'number') return Math.floor(val / (val > 2_000_000_000 ? 1000 : 1));
+              const ms = Date.parse(String(val));
+              if (!isNaN(ms)) return Math.floor(ms / 1000);
+            } catch (_) {}
+            return null;
+          };
+
+          const goLiveDate = getUnixFromGuard(guards?.startDate) ?? nowSec;
+          const endDate = getUnixFromGuard(guards?.endDate) ?? nextMonthSec;
+
           return {
             address: cm.address,
             name: cm.name || 'Candy Machine Collection',
@@ -69,8 +92,8 @@ export default function MerchantPage() {
             remaining: status.remaining,
             isActive: status.isActive,
             price: 0, // Not available in status
-            goLiveDate: null,
-            endDate: null,
+            goLiveDate,
+            endDate,
             creator: '', // Not available in status
             collection: null,
             authority: '', // Not available in status
@@ -118,28 +141,23 @@ export default function MerchantPage() {
       const merchantAccount = await program.account.merchant.fetch(pda);
       setMyMerchant(merchantAccount as any);
 
-      // Compute total deals by scanning deals and filtering by merchant PDA
-      try {
-        const allDeals = await program.account.deal.all();
-        const merchantDeals = allDeals.filter((d: any) => d.account.merchant?.toString() === pda.toString());
-        setTotalDeals(merchantDeals.length);
-        setMyDeals(merchantDeals);
-      } catch (_) {
-        setTotalDeals(0);
-        setMyDeals([]);
-      }
+      // Total deals equals total candy machines (we no longer count on-chain deal accounts here)
+      setMyDeals([]);
 
       // Fetch candy machines from MongoDB
       try {
         const merchantData = await getMerchantFromDB(publicKey.toString());
         if (merchantData) {
           setMyCandyMachines(merchantData.candyMachines);
+          setTotalDeals((merchantData.candyMachines || []).length);
         } else {
           setMyCandyMachines([]);
+          setTotalDeals(0);
         }
       } catch (error) {
         console.warn('Failed to fetch candy machines from database:', error);
         setMyCandyMachines([]);
+        setTotalDeals(0);
       }
     } catch (error) {
       // Account doesn't exist yet - that's okay
@@ -245,7 +263,7 @@ export default function MerchantPage() {
 
   return (
     <div className="container mx-auto px-4 py-8 pt-24">
-      <Toaster position="top-center" richColors />
+      <Toaster position="bottom-right" richColors />
       
       {/* Header Section */}
       <div className="text-center mb-12">
@@ -477,8 +495,16 @@ export default function MerchantPage() {
                           <p className="text-xs text-gray-400">Remaining</p>
                         </div>
                         <div className="text-center p-3 rounded border border-purple-400" style={{ background: 'rgba(0,0,0,0.3)' }}>
-                          <p className="text-2xl font-bold text-purple-400">{cmData.price.toFixed(2)}</p>
-                          <p className="text-xs text-gray-400">Price (SOL)</p>
+                          {(() => {
+                            const cmDb = myCandyMachines.find((c) => c.address === cmData.address);
+                            const priceSol = cmDb?.priceSol;
+                            return (
+                              <>
+                                <p className="text-2xl font-bold text-purple-400">{typeof priceSol === 'number' ? priceSol.toFixed(2) : '—'}</p>
+                                <p className="text-xs text-gray-400">Price (SOL)</p>
+                              </>
+                            );
+                          })()}
                         </div>
                       </div>
 
@@ -487,28 +513,22 @@ export default function MerchantPage() {
                         <div>
                           <p className="text-gray-400 mb-1">📅 Go Live Date</p>
                           <p className="text-white">
-                            {cmData.goLiveDate 
-                              ? new Date(cmData.goLiveDate * 1000).toLocaleString()
-                              : 'Not set'
-                            }
+                            {cmData.goLiveDate ? new Date(cmData.goLiveDate * 1000).toLocaleString() : '—'}
                           </p>
                         </div>
                         <div>
                           <p className="text-gray-400 mb-1">⏰ End Date</p>
                           <p className="text-white">
-                            {cmData.endDate 
-                              ? new Date(cmData.endDate * 1000).toLocaleString()
-                              : 'No end date'
-                            }
+                            {cmData.endDate ? new Date(cmData.endDate * 1000).toLocaleString() : '—'}
                           </p>
                         </div>
-                        <div>
+                        {/* <div>
                           <p className="text-gray-400 mb-1">👤 Authority</p>
                           <p className="text-white font-mono text-xs break-all">{cmData.authority}</p>
-                        </div>
+                        </div> */}
                         <div>
                           <p className="text-gray-400 mb-1">💰 Royalty</p>
-                          <p className="text-white">{(cmData.sellerFeeBasisPoints / 100).toFixed(2)}%</p>
+                          <p className="text-white">{(500 / 100).toFixed(2)}%</p>
                         </div>
                       </div>
 
@@ -516,7 +536,13 @@ export default function MerchantPage() {
                       <div className="mt-4 pt-4 border-t border-purple-400">
                         <div className="flex gap-2">
                           <Button
-                            onClick={() => navigator.clipboard.writeText(cmData.address)}
+                            onClick={() => {
+                              navigator.clipboard.writeText(cmData.address);
+                              toast.success("Address copied to clipboard");
+                              setTimeout(() => {
+                                toast.dismiss();
+                              }, 2000);
+                            }}
                             className="flex-1 text-sm py-2 border-2 border-cyan-400"
                             style={{
                               background: "linear-gradient(45deg, rgba(0,255,255,0.1), rgba(0,255,100,0.1))",
@@ -526,38 +552,7 @@ export default function MerchantPage() {
                           >
                             📋 Copy Address
                           </Button>
-                          <Button
-                            onClick={async () => {
-                              try {
-                                const candyManager = new DealifiCandyMachineManager(umi);
-                                await candyManager.updateCandyMachineGuards(new PublicKey(cmData.address), {});
-                                toast.success('✅ Candy machine is now live!');
-                                // Refresh the data
-                                fetchCandyMachineDetails();
-                              } catch (error) {
-                                console.error('Failed to make candy machine live:', error);
-                                toast.error('Failed to make candy machine live');
-                              }
-                            }}
-                            className="flex-1 text-sm py-2 border-2 border-green-400"
-                            style={{
-                              background: "linear-gradient(45deg, #00ff00, #00ffff)",
-                              textShadow: "1px 1px 0px rgba(0,0,0,0.5)"
-                            }}
-                          >
-                            🚀 Make Live
-                          </Button>
-                          <Link href={`/candy-machine?address=${cmData.address}`}>
-                            <Button
-                              className="flex-1 text-sm py-2 border-2 border-purple-400"
-                              style={{
-                                background: "linear-gradient(45deg, #ff00ff, #00ffff)",
-                                textShadow: "1px 1px 0px rgba(0,0,0,0.5)"
-                              }}
-                            >
-                              🎯 Manage
-                            </Button>
-                          </Link>
+                          {/* Removed Make Live and Manage buttons */}
                         </div>
                       </div>
                     </div>

@@ -13,6 +13,12 @@ export interface CandyMachine {
     mintedAt: string;
   }>
   items?: Array<{ name: string; uri: string }>;
+  // Guard-derived persisted fields
+  priceLamports?: number;
+  priceSol?: number;
+  guardStartDate?: number; // unix seconds
+  guardEndDate?: number;   // unix seconds
+  guardDestination?: string;
 }
 
 const API_BASE = process.env.NEXT_PUBLIC_BACKEND_URL || '';

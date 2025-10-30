@@ -11,6 +11,7 @@ import { toast, Toaster } from "sonner";
 import { createUmi } from "@metaplex-foundation/umi-bundle-defaults";
 import { dasApi } from "@metaplex-foundation/digital-asset-standard-api";
 import { fetchCandyMachine } from "@metaplex-foundation/mpl-candy-machine";
+import { useRouter } from "next/navigation";
 
 export default function MarketplacePage() {
   const [loading, setLoading] = useState(false);
@@ -24,6 +25,7 @@ export default function MarketplacePage() {
   }>>([]);
   const { umi, signer } = useUmiStore();
   const { connected } = useWallet();
+  const router = useRouter();
 
   useEffect(() => {
     loadAllCandyMachines();
@@ -73,21 +75,8 @@ export default function MarketplacePage() {
     }
   };
 
-  const handleMint = async (address: string) => {
-    if (!umi || !signer) {
-      toast.error('Connect wallet to mint');
-      return;
-    }
-    try {
-      const manager = new DealifiCandyMachineManager(umi);
-      await manager.mintNFT(new PublicKey(address), signer);
-      toast.success('Minted!');
-      // Refresh list to update redeemed counts
-      loadAllCandyMachines();
-    } catch (e: any) {
-      console.error('Mint failed:', e);
-      toast.error(`Mint failed: ${e?.message || 'Unknown error'}`);
-    }
+  const handleView = (address: string) => {
+    router.push(`/candy-machine/${address}`);
   };
 
   return (
@@ -146,8 +135,8 @@ export default function MarketplacePage() {
                       </div>
                     )}
                     <div className="pt-4">
-                      <Button onClick={() => handleMint(cm.address)} className="w-full border-2 border-yellow-400">
-                        🎯 Mint
+                      <Button onClick={() => handleView(cm.address)} className="w-full border-2 border-yellow-400">
+                        🔎 View
                       </Button>
                     </div>
                   </CardContent>

@@ -207,7 +207,7 @@ export default function CreateDealPage() {
 
   return (
     <div className="container mx-auto px-4 py-8 pt-24 flex justify-center">
-      <Toaster position="top-center" richColors />
+      <Toaster position="bottom-right" richColors />
       <Card
         className="w-full max-w-2xl border-4"
         style={{

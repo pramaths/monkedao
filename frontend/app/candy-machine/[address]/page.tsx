@@ -10,6 +10,10 @@ import { createUmi } from "@metaplex-foundation/umi-bundle-defaults";
 import { dasApi } from "@metaplex-foundation/digital-asset-standard-api";
 import { fetchCandyMachine } from "@metaplex-foundation/mpl-candy-machine";
 import { PublicKey } from "@solana/web3.js";
+import useUmiStore from "@/store/useUmiStore";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { DealifiCandyMachineManager } from "@/lib/candy-machine-manager";
+import { Toaster, toast } from "sonner";
 
 type ItemMeta = {
   name: string;
@@ -27,6 +31,9 @@ export default function CandyMachineDetailPage() {
   const [merchant, setMerchant] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(false);
   const [supply, setSupply] = useState<{ redeemed: number; available: number } | null>(null);
+  const [minting, setMinting] = useState<boolean>(false);
+  const { umi, signer } = useUmiStore();
+  const { connected } = useWallet();
 
   useEffect(() => {
     const load = async () => {
@@ -89,6 +96,7 @@ export default function CandyMachineDetailPage() {
 
   return (
     <div className="container mx-auto px-4 py-8">
+      <Toaster position="bottom-right" richColors />
       <div className="mb-6">
         <Button variant="outline" onClick={() => router.back()}>
           ← Back
@@ -106,8 +114,40 @@ export default function CandyMachineDetailPage() {
 
       <div className="mb-6">
         <div className="bg-black/40 border-2 border-yellow-400 rounded p-3 text-yellow-300 text-sm">
-          You might receive one of the NFTs from this candy machine. Minting is available on the Marketplace page.
+          You might receive one of the NFTs from this candy machine.
         </div>
+      </div>
+
+      <div className="mb-6 flex flex-col sm:flex-row gap-3">
+        <Button
+          onClick={async () => {
+            if (!connected || !umi || !signer) {
+              toast.error('Connect wallet to mint');
+              return;
+            }
+            setMinting(true);
+            try {
+              const manager = new DealifiCandyMachineManager(umi as any);
+              await manager.mintNFT(new PublicKey(address), signer as any);
+              toast.success('Minted!');
+              // Refresh supply numbers
+              const merchants = await getAllMerchantsFromDB();
+              const found = merchants.flatMap(m => (m.candyMachines || []).map(cm => ({ m, cm }))).find(x => x.cm.address === address);
+              if (found) {
+                setSupply({ redeemed: found.cm.itemsRedeemed, available: found.cm.itemsAvailable });
+              }
+            } catch (e: any) {
+              console.error('Mint failed:', e);
+              toast.error(e?.message || 'Mint failed');
+            } finally {
+              setMinting(false);
+            }
+          }}
+          disabled={minting}
+          className="border-2 border-yellow-400"
+        >
+          {minting ? '⏳ Minting...' : '🎯 Mint'}
+        </Button>
       </div>
 
       {loading ? (
@@ -148,11 +188,7 @@ export default function CandyMachineDetailPage() {
         </div>
       )}
 
-      <div className="mt-8 text-center">
-        <Button className="border-2 border-yellow-400" onClick={() => router.push('/marketplace')}>
-          Go to Marketplace to Mint
-        </Button>
-      </div>
+      <div className="mt-8" />
     </div>
   );
 }

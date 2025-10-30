@@ -179,7 +179,7 @@ const CandyMachineCreator: React.FC = () => {
         console.warn('Failed to fetch initial status:', e);
       }
       
-      // Save candy machine to MongoDB
+      // Save candy machine to MongoDB (including guard-derived fields)
       try {
         const candyMachineData = {
           address: result.candyMachine.toString(),
@@ -187,7 +187,12 @@ const CandyMachineCreator: React.FC = () => {
           itemsRedeemed: 0,
           createdAt: new Date().toISOString(),
           name: config.symbol,
-          symbol: config.symbol
+          symbol: config.symbol,
+          priceLamports: guards.solPayment?.lamports,
+          priceSol: guards.solPayment?.lamports ? (guards.solPayment.lamports / 1_000_000_000) : undefined,
+          guardStartDate: guards.startDate?.date,
+          guardEndDate: guards.endDate?.date,
+          guardDestination: guards.solPayment?.destination || undefined,
         };
         
         await saveCandyMachineToDB(publicKey.toString(), candyMachineData);
